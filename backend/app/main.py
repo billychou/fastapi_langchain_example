@@ -34,6 +34,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+logger.info("CORS allowed origins: %s", settings.cors_origin_list)
 
 
 def sse(payload: dict[str, Any]) -> str:
