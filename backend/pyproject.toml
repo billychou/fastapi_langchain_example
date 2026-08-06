@@ -1,7 +1,7 @@
 [project]
 name = "backend"
-version = "0.1.0"
-description = "FastAPI + LangChain agent backend with SSE streaming"
+version = "0.2.0"
+description = "FastAPI + LangChain agent backend with SSE streaming, integrated user & auth service (dual-token JWT, RBAC)"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115",
@@ -11,6 +11,14 @@ dependencies = [
     "langchain-openai>=1.0",
     "langchain-anthropic>=1.0",
     "pydantic-settings>=2.4",
+    # ---- user & auth service ----
+    "sqlalchemy[asyncio]>=2.0.30",
+    "aiomysql>=0.2.0",
+    "redis>=5.0",
+    "PyJWT>=2.9",
+    "argon2-cffi>=23.1",
+    "cryptography>=43.0",
+    "email-validator>=2.1",
 ]
 
 [dependency-groups]

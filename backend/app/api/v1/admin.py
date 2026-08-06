@@ -11,6 +11,7 @@ from app.db.session import get_db
 from app.deps import AuthContext, get_redis, require_permissions
 from app.exceptions import BizCode, BizError
 from app.models.account import Account, UserProfile
+from app.models.rbac import AccountRole, Role
 from app.schemas.common import ok
 from app.services import audit_service, rbac_service
 
@@ -92,3 +93,50 @@ async def assign_roles(
         detail={"roles": final_roles},
     )
     return ok({"account_uuid": account_uuid, "roles": final_roles})
+
+
+@router.get(
+    "/roles",
+    summary="角色列表(需 rbac:read)",
+    dependencies=[Depends(require_permissions("rbac:read"))],
+)
+async def list_roles(db: AsyncSession = Depends(get_db)):
+    """供用户管理页的角色分配下拉使用。"""
+    roles = (
+        (await db.execute(select(Role).where(Role.status == 1).order_by(Role.id)))
+        .scalars()
+        .all()
+    )
+    return ok(
+        [
+            {
+                "role_code": r.role_code,
+                "role_name": r.role_name,
+                "description": r.description,
+                "is_builtin": bool(r.is_builtin),
+            }
+            for r in roles
+        ]
+    )
+
+
+@router.get(
+    "/accounts/{account_uuid}/roles",
+    summary="查询账号角色(需 rbac:read)",
+    dependencies=[Depends(require_permissions("rbac:read"))],
+)
+async def get_account_roles(account_uuid: str, db: AsyncSession = Depends(get_db)):
+    """用户管理页角色分配弹窗回显用。"""
+    account = (
+        await db.execute(select(Account).where(Account.account_uuid == account_uuid))
+    ).scalar_one_or_none()
+    if account is None:
+        raise BizError(BizCode.NOT_FOUND, "账号不存在")
+    codes = (
+        await db.execute(
+            select(Role.role_code)
+            .join(AccountRole, AccountRole.role_id == Role.id)
+            .where(AccountRole.account_id == account.id)
+        )
+    ).scalars().all()
+    return ok({"account_uuid": account_uuid, "role_codes": sorted(codes)})
