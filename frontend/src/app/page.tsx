@@ -1,24 +1,17 @@
 "use client";
 
 import {
-  AppstoreAddOutlined,
   CloudUploadOutlined,
-  CommentOutlined,
   DeleteOutlined,
   EditOutlined,
   EllipsisOutlined,
-  FileSearchOutlined,
   GlobalOutlined,
-  HeartOutlined,
   PaperClipOutlined,
-  ProductOutlined,
   QuestionCircleOutlined,
-  ScheduleOutlined,
   ShareAltOutlined,
-  SmileOutlined,
   SyncOutlined,
 } from '@ant-design/icons';
-import type { ActionsFeedbackProps, BubbleListProps, ThoughtChainItemProps } from '@ant-design/x';
+import type { BubbleListProps, ThoughtChainItemProps } from '@ant-design/x';
 import {
   Actions,
   Attachments,
@@ -39,292 +32,28 @@ import {
   SSEFields,
   useXChat,
   useXConversations,
-  XModelMessage,
   XModelParams,
   XModelResponse,
   XRequest,
 } from '@ant-design/x-sdk';
 import { Avatar, Button, Flex, type GetProp, message, Pagination, Space } from 'antd';
-import { createStyles } from 'antd-style';
 import dayjs from 'dayjs';
 import React, { useRef, useState } from 'react';
 import '@ant-design/x-markdown/themes/light.css';
 import '@ant-design/x-markdown/themes/dark.css';
 import { BubbleListRef } from '@ant-design/x/es/bubble';
-import { useMarkdownTheme } from '../x-markdown/demo/_utils';
+import { useMarkdownTheme } from '@/x-markdown/demo/_utils';
+import {
+  type ChatMessage,
+  DEFAULT_CONVERSATIONS_ITEMS,
+  DESIGN_GUIDE,
+  HISTORY_MESSAGES,
+  HOT_TOPICS,
+  SENDER_PROMPTS,
+  THOUGHT_CHAIN_CONFIG,
+} from './_utils/config';
+import { useStyle } from './_utils/styles';
 import locale from './_utils/local';
-
-// ==================== Style ====================
-const useStyle = createStyles(({ token, css }) => {
-  return {
-    layout: css`
-      width: 100%;
-      height: 100vh;
-      display: flex;
-      background: ${token.colorBgContainer};
-      font-family: AlibabaPuHuiTi, ${token.fontFamily}, sans-serif;
-    `,
-    // side 样式
-    side: css`
-      background: ${token.colorBgLayout}80;
-      width: 280px;
-      height: 100%;
-      display: flex;
-      flex-direction: column;
-      padding: 0 12px;
-      box-sizing: border-box;
-    `,
-    logo: css`
-      display: flex;
-      align-items: center;
-      justify-content: start;
-      padding: 0 24px;
-      box-sizing: border-box;
-      gap: 8px;
-      margin: 24px 0;
-
-      span {
-        font-weight: bold;
-        color: ${token.colorText};
-        font-size: 16px;
-      }
-    `,
-    conversations: css`
-      overflow-y: auto;
-      margin-top: 12px;
-      padding: 0;
-      flex: 1;
-      .ant-conversations-list {
-        padding-inline-start: 0;
-      }
-    `,
-    sideFooter: css`
-      border-top: 1px solid ${token.colorBorderSecondary};
-      height: 40px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    `,
-    // chat list 样式
-    chat: css`
-      height: 100%;
-      width: calc(100% - 280px);
-      box-sizing: border-box;
-      display: flex;
-      flex-direction: column;
-      justify-content: space-between;
-      .ant-bubble-content-updating {
-        background-image: linear-gradient(90deg, #ff6b23 0%, #af3cb8 31%, #53b6ff 89%);
-        background-size: 100% 2px;
-        background-repeat: no-repeat;
-        background-position: bottom;
-      }
-    `,
-    chatPrompt: css`
-      .ant-prompts-label {
-        color: #000000e0 !important;
-      }
-      .ant-prompts-desc {
-        color: #000000a6 !important;
-        width: 100%;
-      }
-      .ant-prompts-icon {
-        color: #000000a6 !important;
-      }
-    `,
-    chatList: css`
-      flex: 1;
-      overflow-y: auto;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      width: 100%;
-    `,
-    placeholder: css`
-      width: 100%;
-      padding: ${token.paddingLG}px;
-      box-sizing: border-box;
-    `,
-    // sender 样式
-    sender: css`
-      width: 100%;
-      max-width: 840px;
-    `,
-    speechButton: css`
-      font-size: 18px;
-      color: ${token.colorText} !important;
-    `,
-    senderPrompt: css`
-      width: 100%;
-      max-width: 840px;
-      margin: 0 auto;
-      color: ${token.colorText};
-    `,
-  };
-});
-
-// ==================== Static Config ====================
-const HISTORY_MESSAGES: {
-  [key: string]: DefaultMessageInfo<ChatMessage>[];
-} = {
-  'default-1': [
-    {
-      message: { role: 'user', content: locale.howToQuicklyInstallAndImportComponents },
-      status: 'success',
-    },
-    {
-      message: {
-        role: 'assistant',
-        content: locale.aiMessage_2,
-      },
-      status: 'success',
-    },
-  ],
-  'default-2': [
-    { message: { role: 'user', content: locale.newAgiHybridInterface }, status: 'success' },
-    {
-      message: {
-        role: 'assistant',
-        content: locale.aiMessage_1,
-      },
-      status: 'success',
-    },
-  ],
-};
-
-const DEFAULT_CONVERSATIONS_ITEMS = [
-  {
-    key: 'default-0',
-    label: locale.whatIsAntDesignX,
-    group: locale.today,
-  },
-  {
-    key: 'default-1',
-    label: locale.howToQuicklyInstallAndImportComponents,
-    group: locale.today,
-  },
-  {
-    key: 'default-2',
-    label: locale.newAgiHybridInterface,
-    group: locale.yesterday,
-  },
-];
-
-const HOT_TOPICS = {
-  key: '1',
-  label: locale.hotTopics,
-  children: [
-    {
-      key: '1-1',
-      description: locale.whatComponentsAreInAntDesignX,
-      icon: <span style={{ color: '#f93a4a', fontWeight: 700 }}>1</span>,
-    },
-    {
-      key: '1-2',
-      description: locale.newAgiHybridInterface,
-      icon: <span style={{ color: '#ff6565', fontWeight: 700 }}>2</span>,
-    },
-    {
-      key: '1-3',
-      description: locale.whatComponentsAreInAntDesignX,
-      icon: <span style={{ color: '#ff8f1f', fontWeight: 700 }}>3</span>,
-    },
-    {
-      key: '1-4',
-      description: locale.comeAndDiscoverNewDesignParadigm,
-      icon: <span style={{ color: '#00000040', fontWeight: 700 }}>4</span>,
-    },
-    {
-      key: '1-5',
-      description: locale.howToQuicklyInstallAndImportComponents,
-      icon: <span style={{ color: '#00000040', fontWeight: 700 }}>5</span>,
-    },
-  ],
-};
-
-const DESIGN_GUIDE = {
-  key: '2',
-  label: locale.designGuide,
-  children: [
-    {
-      key: '2-1',
-      icon: <HeartOutlined />,
-      label: locale.intention,
-      description: locale.aiUnderstandsUserNeedsAndProvidesSolutions,
-    },
-    {
-      key: '2-2',
-      icon: <SmileOutlined />,
-      label: locale.role,
-      description: locale.aiPublicPersonAndImage,
-    },
-    {
-      key: '2-3',
-      icon: <CommentOutlined />,
-      label: locale.chat,
-      description: locale.howAICanExpressItselfWayUsersUnderstand,
-    },
-    {
-      key: '2-4',
-      icon: <PaperClipOutlined />,
-      label: locale.interface,
-      description: locale.aiBalances,
-    },
-  ],
-};
-
-const SENDER_PROMPTS: GetProp<typeof Prompts, 'items'> = [
-  {
-    key: '1',
-    description: locale.upgrades,
-    icon: <ScheduleOutlined />,
-  },
-  {
-    key: '2',
-    description: locale.components,
-    icon: <ProductOutlined />,
-  },
-  {
-    key: '3',
-    description: locale.richGuide,
-    icon: <FileSearchOutlined />,
-  },
-  {
-    key: '4',
-    description: locale.installationIntroduction,
-    icon: <AppstoreAddOutlined />,
-  },
-];
-
-const THOUGHT_CHAIN_CONFIG = {
-  loading: {
-    title: locale.modelIsRunning,
-    status: 'loading',
-  },
-  updating: {
-    title: locale.modelIsRunning,
-    status: 'loading',
-  },
-  success: {
-    title: locale.modelExecutionCompleted,
-    status: 'success',
-  },
-  error: {
-    title: locale.executionFailed,
-    status: 'error',
-  },
-  abort: {
-    title: locale.aborted,
-    status: 'abort',
-  },
-};
-
-// ==================== Type ====================
-interface ChatMessage extends XModelMessage {
-  extraInfo?: {
-    feedback: ActionsFeedbackProps['value'];
-  };
-}
 
 // ==================== Context ====================
 const ChatContext = React.createContext<{

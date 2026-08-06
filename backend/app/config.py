@@ -24,7 +24,7 @@ class Settings(BaseSettings):
 
     system_prompt: str = DEFAULT_SYSTEM_PROMPT
 
-    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173,http://127.0.0.1:5001,http://localhost:3000"
+    cors_origins: str = "http://localhost:5173"
 
     @property
     def cors_origin_list(self) -> list[str]:
