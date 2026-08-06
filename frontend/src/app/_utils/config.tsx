@@ -56,16 +56,6 @@ export const DEFAULT_CONVERSATIONS_ITEMS = [
     label: locale.whatIsAntDesignX,
     group: locale.today,
   },
-  {
-    key: 'default-1',
-    label: locale.howToQuicklyInstallAndImportComponents,
-    group: locale.today,
-  },
-  {
-    key: 'default-2',
-    label: locale.newAgiHybridInterface,
-    group: locale.yesterday,
-  },
 ];
 
 export const HOT_TOPICS = {
