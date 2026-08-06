@@ -2,7 +2,6 @@
 
 import json
 import logging
-import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
