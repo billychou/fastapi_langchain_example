@@ -6,6 +6,8 @@ import {
   EditOutlined,
   EllipsisOutlined,
   GlobalOutlined,
+  LogoutOutlined,
+  TeamOutlined,
   PaperClipOutlined,
   QuestionCircleOutlined,
   ShareAltOutlined,
@@ -36,12 +38,16 @@ import {
   XModelResponse,
   XRequest,
 } from '@ant-design/x-sdk';
-import { Avatar, Button, Flex, type GetProp, message, Pagination, Space } from 'antd';
+import { Avatar, Button, Dropdown, Flex, type GetProp, message, Pagination, Space, Spin } from 'antd';
 import dayjs from 'dayjs';
-import React, { useRef, useState } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import React, { useEffect, useRef, useState } from 'react';
 import '@ant-design/x-markdown/themes/light.css';
 import '@ant-design/x-markdown/themes/dark.css';
 import { BubbleListRef } from '@ant-design/x/es/bubble';
+import { API_BASE, getValidAccessToken } from '@/lib/api';
+import { useAuth } from '@/lib/auth-context';
 import { useMarkdownTheme } from '@/x-markdown/demo/_utils';
 import {
   type ChatMessage,
@@ -162,10 +168,19 @@ const providerFactory = (conversationKey: string) => {
       conversationKey,
       new DeepSeekChatProvider({
         request: XRequest<XModelParams, Partial<Record<SSEFields, XModelResponse>>>(
-          'http://127.0.0.1:5001/api/chat',
+          `${API_BASE}/api/chat`,
           {
             manual: true,
             params: {
+            },
+            // 每次发起对话前注入最新 Access Token(临近过期自动无感续期)
+            middlewares: {
+              onRequest: async (url, options) => {
+                const token = await getValidAccessToken();
+                const headers: Record<string, string> = { ...(options.headers || {}) };
+                if (token) headers.Authorization = `Bearer ${token}`;
+                return [url, { ...options, headers }];
+              },
             },
           },
         ),
@@ -276,6 +291,22 @@ const Independent: React.FC = () => {
     },
   });
 
+  // ==================== Auth ====================
+  const router = useRouter();
+  const { user, initializing, isAdmin, logout } = useAuth();
+
+  useEffect(() => {
+    if (!initializing && !user) router.replace('/login');
+  }, [initializing, user, router]);
+
+  if (initializing || !user) {
+    return (
+      <Flex align="center" justify="center" style={{ minHeight: '100vh' }}>
+        <Spin size="large" />
+      </Flex>
+    );
+  }
+
   // ==================== Event ====================
   const onSubmit = (val: string) => {
     if (!val) return;
@@ -353,7 +384,33 @@ const Independent: React.FC = () => {
       />
 
       <div className={styles.sideFooter}>
-        <Avatar size={24} />
+        <Dropdown
+          trigger={['click']}
+          menu={{
+            items: [
+              ...(isAdmin
+                ? [
+                    {
+                      key: 'users',
+                      icon: <TeamOutlined />,
+                      label: <Link href="/users">用户管理</Link>,
+                    },
+                  ]
+                : []),
+              { key: 'logout', icon: <LogoutOutlined />, label: '退出登录', danger: true },
+            ],
+            onClick: ({ key }) => {
+              if (key === 'logout') {
+                void logout().then(() => router.replace('/login'));
+              }
+            },
+          }}
+        >
+          <Space style={{ cursor: 'pointer' }}>
+            <Avatar size={24}>{user?.nickname?.slice(0, 1) || 'U'}</Avatar>
+            <span style={{ fontSize: 12 }}>{user?.nickname || '用户'}</span>
+          </Space>
+        </Dropdown>
         <Button type="text" icon={<QuestionCircleOutlined />} />
       </div>
     </div>

@@ -4,7 +4,7 @@ A small full-stack demo: a FastAPI + LangChain agent backend that streams replie
 
 ## Layout
 
-- `backend/` — FastAPI + LangChain 1.x / LangGraph agent. Streams OpenAI-style SSE chunks from `POST /api/chat`.
+- `backend/` — FastAPI + LangChain 1.x / LangGraph agent (SSE chat at `POST /api/chat`) **plus an integrated enterprise user & auth system** (multi-identity accounts, dual-token JWT, RBAC, rate limiting, PII encryption) under `/api/v1`.
 - `frontend/` — Next.js 16 + React 19 + Ant Design X chat UI, wired to the backend via `@ant-design/x-sdk`'s `DeepSeekChatProvider`.
 
 ## Quick start
@@ -14,11 +14,14 @@ A small full-stack demo: a FastAPI + LangChain agent backend that streams replie
 ```bash
 cd backend
 uv sync
-cp .env.example .env   # then edit LLM_PROVIDER / API keys
+cp .env.example .env   # then edit LLM_PROVIDER / API keys + JWT_SECRET_KEY
+docker compose up -d   # MySQL 8 + Redis 7 (migrations auto-run on first boot)
 uv run uvicorn app.main:app --reload --port 5001
 ```
 
-Without any API key the server falls back to a deterministic `MockChatModel` — canned replies plus demo tool calls — so the full agent loop (model → tool → model) works out of the box. Try `现在几点了`, `北京天气怎么样`, `计算 12 * (3 + 4)`.
+Without any LLM API key the server falls back to a deterministic `MockChatModel` — canned replies plus demo tool calls — so the full agent loop (model → tool → model) works out of the box. Try `现在几点了`, `北京天气怎么样`, `计算 12 * (3 + 4)`.
+
+Chat requires login by default (`CHAT_REQUIRE_AUTH=true`): register an account via `POST /api/v1/auth/register` (or the frontend `/register` page) first. Set it to `false` to allow anonymous chat.
 
 ### Frontend
 
@@ -28,7 +31,9 @@ pnpm install
 pnpm dev   # http://localhost:3000
 ```
 
-The chat posts to `http://127.0.0.1:5001/api/chat` (hardcoded in `frontend/src/app/page.tsx`). Start the backend first.
+The chat posts to `http://127.0.0.1:5001/api/chat` (override with `NEXT_PUBLIC_API_BASE`). Start the backend first.
+
+Login is required: `/login` and `/register` handle authentication (dual-token JWT with automatic silent refresh); `/users` is the admin user-management page (account list + role assignment). The chat sidebar avatar menu shows the current user and logout.
 
 ## Configuration
 
@@ -53,7 +58,7 @@ Settings are lru-cached at startup — restart after editing `.env`.
 ```
 
 ### `POST /api/chat`
-Request body (OpenAI-style):
+Requires `Authorization: Bearer <access_token>` when `CHAT_REQUIRE_AUTH=true` (default). Request body (OpenAI-style):
 ```json
 {
   "messages": [{"role": "user", "content": "你是谁"}],
@@ -63,6 +68,10 @@ Request body (OpenAI-style):
 
 Response: `text/event-stream`. Each line is `data: {"choices":[{"delta":{"content":"..."}}]}`, terminated by `data: [DONE]`. If the agent raises mid-stream, the error message is appended as a final content delta so it surfaces in the chat bubble. Conversation memory is keyed by `conversation_id` (LangGraph `thread_id`).
 
+### User & auth (`/api/v1`)
+
+`POST /api/v1/auth/register` · `POST /api/v1/auth/login` (dual-token) · `POST /api/v1/auth/refresh` (rotation + reuse detection) · `POST /api/v1/auth/logout` · `GET /api/v1/account/me` · `GET /api/v1/admin/accounts` · `POST /api/v1/admin/accounts/{uuid}/roles` — see `backend/README.md` for the full table and `backend/docs/architecture.md` for sequence diagrams. Responses use a `{code, message, data}` envelope.
+
 ## Architecture notes
 
 - **Agent** — `backend/app/agent.py` `get_agent()` (lru-cached): `create_agent(model, tools=ALL_TOOLS, system_prompt, checkpointer=InMemorySaver())`. Multi-turn memory lives in-process; restart clears it.
@@ -71,5 +80,7 @@ Response: `text/event-stream`. Each line is `data: {"choices":[{"delta":{"conten
 - **SSE format** — OpenAI-style chunks so `@ant-design/x-sdk`'s `DeepSeekChatProvider` parses them directly. Tool calls/results from the agent are not surfaced in the stream; the agent emits a final text message after any tool loop, which is what the UI renders.
 - **Frontend provider** — One `DeepSeekChatProvider` per conversation key, cached in `providerCaches`. `useXChat` manages streaming state, retry, abort.
 - **Next.js 16 caveat** — This repo's Next.js has breaking changes vs. prior versions; see `frontend/AGENTS.md` before touching Next.js-specific code.
+
+- **User & auth** — merged into the backend: account/credential/profile split, Redis session registry for refresh tokens (instant revocation on logout/kick/password change), Argon2id hashing, token-bucket rate limiting, RBAC dependencies (`require_permissions`). See `backend/docs/architecture.md`.
 
 See `CLAUDE.md` for the full SSE contract and architecture details.
