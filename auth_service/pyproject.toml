@@ -1,0 +1,31 @@
+[project]
+name = "auth-service"
+version = "0.1.0"
+description = "Enterprise User & Auth Service: multi-identity accounts, dual-token JWT, RBAC, Redis rate limiting"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.8",
+    "pydantic-settings>=2.4",
+    "sqlalchemy[asyncio]>=2.0.30",
+    "aiomysql>=0.2.0",
+    "redis>=5.0",
+    "PyJWT>=2.9",
+    "argon2-cffi>=23.1",
+    "cryptography>=43.0",
+    "email-validator>=2.1",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.27",
+    "ruff>=0.6",
+]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"

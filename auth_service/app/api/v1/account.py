@@ -1,0 +1,93 @@
+"""账号自服务路由: 个人资料 / 在线会话管理(踢人)。"""
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends, Path
+from redis.asyncio import Redis
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.session import get_db
+from app.deps import AuthContext, get_current, get_redis
+from app.exceptions import BizCode, BizError
+from app.models.account import Account
+from app.schemas import AccountInfo, SessionInfo
+from app.schemas.common import ok
+from app.services import rbac_service
+from app.services.session_store import SessionStore
+
+router = APIRouter(prefix="/account", tags=["account"])
+
+
+@router.get("/me", summary="当前账号资料(PII 仅返回脱敏值)")
+async def me(
+    ctx: AuthContext = Depends(get_current),
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    account = await db.get(Account, ctx.account_id)
+    if account is None:
+        raise BizError(BizCode.NOT_FOUND, "账号不存在")
+    roles, _ = await rbac_service.get_account_rbac(db, redis, ctx.account_id)
+    p = account.profile
+    return ok(
+        AccountInfo(
+            account_uuid=account.account_uuid,
+            nickname=p.nickname if p else None,
+            avatar_url=p.avatar_url if p else None,
+            phone_masked=p.phone_masked if p else None,
+            email_masked=p.email_masked if p else None,
+            roles=roles,
+        ).model_dump()
+    )
+
+
+@router.get("/sessions", summary="当前账号在线会话列表")
+async def list_sessions(
+    ctx: AuthContext = Depends(get_current),
+    redis: Redis = Depends(get_redis),
+):
+    sessions = await SessionStore(redis).list_sessions(ctx.account_id)
+    data = [
+        SessionInfo(
+            session_id=s["sid"],
+            device_id=s.get("device_id") or None,
+            ip=s.get("ip"),
+            user_agent=s.get("user_agent") or None,
+            created_at=s.get("created_at"),
+            last_seen=s.get("last_seen"),
+        ).model_dump()
+        | {"current": s["sid"] == ctx.session_id}
+        for s in sessions
+    ]
+    return ok(data)
+
+
+@router.delete("/sessions/{session_id}", summary="下线指定会话(单端互踢/设备管理)")
+async def kick_session(
+    session_id: str = Path(max_length=64),
+    ctx: AuthContext = Depends(get_current),
+    redis: Redis = Depends(get_redis),
+):
+    if session_id == ctx.session_id:
+        raise BizError(BizCode.BAD_REQUEST, "当前会话请使用登出接口")
+    await SessionStore(redis).revoke_session(ctx.account_id, session_id)
+    return ok({"session_id": session_id})
+
+
+@router.put("/login-policy", summary="切换登录策略(multi_device/single_device)")
+async def update_login_policy(
+    policy: str,
+    ctx: AuthContext = Depends(get_current),
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    if policy not in {"multi_device", "single_device"}:
+        raise BizError(BizCode.BAD_REQUEST, "策略取值非法")
+    account = await db.get(Account, ctx.account_id)
+    if account is None:
+        raise BizError(BizCode.NOT_FOUND, "账号不存在")
+    account.login_policy = policy
+    await db.commit()
+    if policy == "single_device":
+        # 立即收敛: 只保留当前会话
+        await SessionStore(redis).kick_other_sessions(ctx.account_id, keep_sid=ctx.session_id)
+    return ok({"login_policy": policy})
