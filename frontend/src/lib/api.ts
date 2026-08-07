@@ -230,3 +230,39 @@ export const authApi = {
       },
     ),
 };
+
+// ---------------- Agent 会话 (agent_threads) ----------------
+export interface ThreadItem {
+  thread_id: string;
+  title: string;
+  last_message: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ThreadMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export const threadApi = {
+  list: () => request<ThreadItem[]>("/api/v1/threads", { method: "GET" }),
+  create: (title?: string) =>
+    request<ThreadItem>("/api/v1/threads", {
+      method: "POST",
+      body: JSON.stringify(title ? { title } : {}),
+    }),
+  rename: (threadId: string, title: string) =>
+    request<ThreadItem>(`/api/v1/threads/${threadId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ title }),
+    }),
+  remove: (threadId: string) =>
+    request<{ thread_id: string }>(`/api/v1/threads/${threadId}`, {
+      method: "DELETE",
+    }),
+  messages: (threadId: string) =>
+    request<ThreadMessage[]>(`/api/v1/threads/${threadId}/messages`, {
+      method: "GET",
+    }),
+};

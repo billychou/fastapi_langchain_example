@@ -49,14 +49,20 @@ uv run uvicorn app.main:app --reload --port 5001
 ```
 
 > 已有 MySQL 实例时需手动执行：`mysql < migrations/001_schema.sql`、
-> `mysql < migrations/002_seed_rbac.sql`，并按 `.env.example` 调整 `DATABASE_URL`。
+> `mysql < migrations/002_seed_rbac.sql`、`mysql < migrations/003_agent_threads.sql`，
+> 并按 `.env.example` 调整 `DATABASE_URL`。
 
 ## 接口速览
 
 | Method | Path | 说明 | 鉴权 |
 |---|---|---|---|
 | GET | /api/health | 健康检查 | 匿名 |
-| POST | /api/chat | SSE 聊天 | Access Token |
+| POST | /api/chat | SSE 聊天(自动建档/更新会话元数据) | Access Token |
+| GET | /api/v1/threads | 会话列表(按最后对话倒序) | Access Token |
+| POST | /api/v1/threads | 新建会话 | Access Token |
+| PATCH | /api/v1/threads/{thread_id} | 重命名会话 | Access Token |
+| DELETE | /api/v1/threads/{thread_id} | 删除会话(含 checkpoint 清理) | Access Token |
+| GET | /api/v1/threads/{thread_id}/messages | 会话历史消息(checkpoint) | Access Token |
 | POST | /api/v1/auth/register | 注册(手机号/邮箱+密码) | 匿名(限流) |
 | POST | /api/v1/auth/login | 登录, 返回双 Token | 匿名(限流+锁定) |
 | POST | /api/v1/auth/refresh | 无感续期(轮换+重放检测) | Refresh Token |
