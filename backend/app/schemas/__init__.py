@@ -12,6 +12,12 @@ from app.schemas.auth import (
     TokenPairResponse,
 )
 from app.schemas.chat import ChatRequest, MessageType
+from app.schemas.threads import (
+    CreateThreadRequest,
+    ThreadItem,
+    ThreadMessage,
+    UpdateThreadRequest,
+)
 from app.schemas.common import ok
 
 __all__ = [
@@ -28,4 +34,8 @@ __all__ = [
     "TokenPairResponse",
     "AccountInfo",
     "SessionInfo",
+    "ThreadItem",
+    "CreateThreadRequest",
+    "UpdateThreadRequest",
+    "ThreadMessage",
 ]

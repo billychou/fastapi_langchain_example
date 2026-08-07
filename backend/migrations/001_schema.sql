@@ -8,9 +8,9 @@
 --   4. 所有表 InnoDB / utf8mb4, 显式外键 + 唯一索引 + 组合索引
 -- =====================================================================
 
-CREATE DATABASE IF NOT EXISTS `auth_service`
+CREATE DATABASE IF NOT EXISTS `fastapi_langchain_example`
   DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
-USE `auth_service`;
+USE `fastapi_langchain_example`;
 
 -- ---------------------------------------------------------------------
 -- 1. 账号主表: 只放账号生命周期与策略, 不存放任何 PII
@@ -29,6 +29,7 @@ CREATE TABLE `account` (
   KEY `idx_account_status` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='账号主表';
 
+USE `fastapi_langchain_example`;
 -- ---------------------------------------------------------------------
 -- 2. 用户资料表: 与账号 1:1, 承载 PII(加密存储 + 盲索引 + 脱敏展示)
 -- ---------------------------------------------------------------------

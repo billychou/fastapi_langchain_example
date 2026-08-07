@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.core import tokens
 from app.db.session import get_db
-from app.exceptions import AuthError, BizCode
+from app.exceptions import AuthError, BizCode, BizError
 from app.services import rbac_service
 from app.services.session_store import SessionStore
 
@@ -84,6 +84,18 @@ async def get_current(
         roles=roles,
         permissions=perms,
     )
+
+
+async def get_current_optional(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+) -> AuthContext | None:
+    """可选认证: CHAT_REQUIRE_AUTH=true 时等价 get_current(强制登录),
+    否则返回 None(匿名演示模式)。供 /api/chat 使用。"""
+    if not get_settings().chat_require_auth:
+        return None
+    return await get_current(request, db=db, redis=redis)
 
 
 def require_permissions(*perm_codes: str):

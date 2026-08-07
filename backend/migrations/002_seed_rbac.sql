@@ -2,7 +2,7 @@
 -- RBAC 初始化种子数据: 内置角色 / API 权限 / 菜单 / 授权关系
 -- 执行前置: 001_schema.sql
 -- =====================================================================
-USE `auth_service`;
+USE `fastapi_langchain_example`;
 
 -- ---- 内置角色 --------------------------------------------------------
 INSERT INTO `role` (`role_code`, `role_name`, `description`, `is_builtin`) VALUES
@@ -26,8 +26,7 @@ SELECT r.id, p.id FROM `role` r JOIN `permission` p
 
 -- ---- 菜单 -------------------------------------------------------------
 INSERT INTO `menu` (`parent_id`, `menu_code`, `menu_name`, `menu_type`, `route_path`, `sort_order`) VALUES
-  (NULL, 'system',        '系统管理', 1, '/system',          100),
-  (NULL, NULL,            '',         2, NULL,               0);
+  (NULL, 'system',        '系统管理', 1, '/system',          100);
 -- 上一条占位行仅用于保持自增连续, 实际菜单按下面方式追加:
 DELETE FROM `menu` WHERE `menu_code` IS NULL;
 
