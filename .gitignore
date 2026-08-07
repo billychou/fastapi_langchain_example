@@ -136,6 +136,11 @@ celerybeat.pid
 *.aof
 *.pid
 
+# LangGraph SQLite checkpointer (含 WAL/SHM 附属文件)
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
 # RabbitMQ
 mnesia/
 rabbitmq/

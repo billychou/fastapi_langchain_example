@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     system_prompt: str = DEFAULT_SYSTEM_PROMPT
     chat_require_auth: bool = True  # /api/chat 是否要求登录(企业默认开启)
+    checkpoint_db_path: str = "./agent_checkpoints.sqlite"  # LangGraph SQLite checkpointer 本地文件
 
     # ================= MySQL =================
     database_url: str = (

@@ -25,7 +25,7 @@ from langchain_core.messages import (
     SystemMessage,
 )
 
-from app.agent import get_agent
+from app.agent import close_checkpointer, get_agent, init_checkpointer
 from app.api.v1.router import api_router
 from app.config import get_settings
 from app.db.redis import close_redis, init_redis
@@ -48,6 +48,7 @@ logger = logging.getLogger("api")
 async def lifespan(app: FastAPI):
     """预热资源: 数据库引擎惰性创建; Redis 探活失败仅告警(聊天功能可降级运行)。"""
     get_engine()
+    await init_checkpointer()  # 打开 SQLite checkpointer 连接并建表
     try:
         redis = init_redis()
         await redis.ping()
@@ -55,6 +56,7 @@ async def lifespan(app: FastAPI):
         logger.warning("Redis 不可用, 认证相关接口将无法工作: %s", exc)
     logger.info("backend started")
     yield
+    await close_checkpointer()
     await close_redis()
     await dispose_engine()
 
@@ -196,7 +198,7 @@ async def chat_events(
     登录态下, 一轮成功结束后更新 agent_threads 元数据(标题/预览/时间);
     元数据写入失败不影响 SSE 输出。
     """
-    agent = get_agent()
+    agent = await get_agent()
     thread_id = request.conversation_id
     config = {"configurable": {"thread_id": thread_id}}
 
