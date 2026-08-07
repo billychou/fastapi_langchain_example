@@ -1,21 +1,60 @@
-"""Agent construction: chat model + LangChain agent + conversation memory."""
+"""Agent construction: chat model + LangChain agent + SQLite conversation memory."""
 
 import asyncio
 import json
 import logging
-from functools import lru_cache
+from pathlib import Path
+from typing import Any
 
+import aiosqlite
 from langchain.agents import create_agent
 from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
-from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from app.config import Settings, get_settings
 from app.tools import ALL_TOOLS
 
 logger = logging.getLogger("agent")
+
+
+# ---------------------------------------------------------------------------
+# SQLite checkpointer lifecycle
+#
+# AsyncSqliteSaver keeps a single long-lived aiosqlite connection. The
+# checkpointer is initialized lazily (or eagerly from FastAPI lifespan) and
+# closed on shutdown so the event loop can exit cleanly.
+# ---------------------------------------------------------------------------
+_checkpointer: AsyncSqliteSaver | None = None
+_checkpointer_lock = asyncio.Lock()
+
+
+async def init_checkpointer() -> AsyncSqliteSaver:
+    """Open (or reuse) the SQLite-backed checkpointer; creates file and tables."""
+    global _checkpointer
+    if _checkpointer is None:
+        async with _checkpointer_lock:
+            if _checkpointer is None:
+                settings = get_settings()
+                db_path = Path(settings.checkpoint_db_path)
+                db_path.parent.mkdir(parents=True, exist_ok=True)
+                conn = await aiosqlite.connect(db_path)
+                saver = AsyncSqliteSaver(conn)
+                await saver.setup()
+                _checkpointer = saver
+                logger.info("Agent checkpointer initialized (sqlite path=%s)", db_path)
+    return _checkpointer
+
+
+async def close_checkpointer() -> None:
+    """Close the SQLite connection if it was opened."""
+    global _checkpointer
+    saver, _checkpointer = _checkpointer, None
+    if saver is not None:
+        await saver.conn.close()
+        logger.info("Agent checkpointer closed")
 
 
 # ---------------------------------------------------------------------------
@@ -189,25 +228,38 @@ def _resolve_model(settings: Settings) -> BaseChatModel:
     return build_chat_model(settings)
 
 
-@lru_cache
-def get_agent():
-    """Create the agent once: model + tools + in-memory conversation store."""
-    settings = get_settings()
-    model = _resolve_model(settings)
-    checkpointer = InMemorySaver()
-    agent = create_agent(
-        model=model,
-        tools=ALL_TOOLS,
-        system_prompt=settings.system_prompt,
-        checkpointer=checkpointer,
-    )
-    logger.info("Agent ready (provider=%s, model=%s)", settings.llm_provider, settings.llm_model)
-    return agent
+_agent: Any | None = None
+_agent_lock = asyncio.Lock()
+
+
+async def get_agent() -> Any:
+    """Create the agent once: model + tools + SQLite-backed conversation store."""
+    global _agent
+    if _agent is None:
+        async with _agent_lock:
+            if _agent is None:
+                settings = get_settings()
+                model = _resolve_model(settings)
+                checkpointer = await init_checkpointer()
+                _agent = create_agent(
+                    model=model,
+                    tools=ALL_TOOLS,
+                    system_prompt=settings.system_prompt,
+                    checkpointer=checkpointer,
+                )
+                logger.info(
+                    "Agent ready (provider=%s, model=%s)", settings.llm_provider, settings.llm_model
+                )
+    return _agent
 
 
 if __name__ == "__main__":
-    agent = get_agent()
-    user_message = {"role": "user", "content": "你是谁"}
-    config = {"configurable": {"thread_id": "123"}}
-    ret = agent.invoke(input=user_message, config=config)
-    print(ret)
+    async def _demo() -> None:
+        agent = await get_agent()
+        user_message = {"role": "user", "content": "你是谁"}
+        config = {"configurable": {"thread_id": "123"}}
+        ret = await agent.ainvoke(input=user_message, config=config)
+        print(ret)
+        await close_checkpointer()
+
+    asyncio.run(_demo())

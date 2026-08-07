@@ -1,7 +1,7 @@
 """Agent 会话元数据路由: 列表/新建/重命名/删除 + 历史消息读取。
 
-历史消息直接读 LangGraph checkpointer 状态(当前为进程内 InMemorySaver,
-服务重启后为空); 元数据(agent_threads)持久化在 MySQL, 重启不丢。
+历史消息直接读 LangGraph checkpointer 状态(当前为本地 SQLite, 服务重启后仍保留);
+会话元数据(agent_threads)持久化在 MySQL。
 """
 from __future__ import annotations
 
@@ -80,13 +80,14 @@ async def delete_thread(
     if not deleted:
         raise BizError(BizCode.NOT_FOUND, "会话不存在")
     try:
-        await get_agent().checkpointer.adelete_thread(thread_id)
+        agent = await get_agent()
+        await agent.checkpointer.adelete_thread(thread_id)
     except Exception:  # noqa: BLE001 - checkpoint 清理失败不影响删除结果
         logger.warning("清理 LangGraph checkpoint 失败 thread_id=%s", thread_id, exc_info=True)
     return ok({"thread_id": thread_id})
 
 
-@router.get("/{thread_id}/messages", summary="会话历史消息(读 LangGraph checkpoint, 服务重启后为空)")
+@router.get("/{thread_id}/messages", summary="会话历史消息(读 LangGraph checkpoint)")
 async def get_thread_messages(
     thread_id: str = Path(max_length=64),
     ctx: AuthContext = Depends(get_current),
@@ -96,7 +97,8 @@ async def get_thread_messages(
     if thread is None:
         raise BizError(BizCode.NOT_FOUND, "会话不存在")
 
-    state = await get_agent().aget_state({"configurable": {"thread_id": thread_id}})
+    agent = await get_agent()
+    state = await agent.aget_state({"configurable": {"thread_id": thread_id}})
     messages: list[dict] = []
     if state is not None:
         for m in state.values.get("messages", []):
