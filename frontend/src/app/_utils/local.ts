@@ -200,8 +200,20 @@ const enUS = {
   },
 };
 
-export const isZhCN =
-  typeof window !== 'undefined' && window?.parent?.location?.pathname?.includes('-cn');
+
+export const isZhCN = (() => {
+  // 1. 服务端环境直接返回 false
+  if (typeof window === 'undefined') return false;
+  // try {
+  //   // 2. 尝试获取父级页面的 pathname（如果有 iframe 嵌套）
+  //   const pathname = window.parent.location.pathname;
+  //   return pathname.includes('-cn');
+  // } catch (e) {
+  //   // 3. 如果发生跨域限制，降级获取当前窗口自己的 pathname
+  //   return window.location.pathname.includes('-cn');
+  // }
+  return true;
+})();
 
 export default isZhCN
   ? ({ ...zhCN_antd, ...zhCN, ...zhCN_X } as typeof zhCN_antd & typeof zhCN & typeof zhCN_X)

@@ -10,7 +10,7 @@ import {
 } from '@ant-design/icons';
 import type { ActionsFeedbackProps } from '@ant-design/x';
 import { Prompts } from '@ant-design/x';
-import type { DefaultMessageInfo, XModelMessage } from '@ant-design/x-sdk';
+import type { XModelMessage } from '@ant-design/x-sdk';
 import type { GetProp } from 'antd';
 import locale from './local';
 
@@ -22,42 +22,6 @@ export interface ChatMessage extends XModelMessage {
 }
 
 // ==================== Static Config ====================
-export const HISTORY_MESSAGES: {
-  [key: string]: DefaultMessageInfo<ChatMessage>[];
-} = {
-  'default-1': [
-    {
-      message: { role: 'user', content: locale.howToQuicklyInstallAndImportComponents },
-      status: 'success',
-    },
-    {
-      message: {
-        role: 'assistant',
-        content: locale.aiMessage_2,
-      },
-      status: 'success',
-    },
-  ],
-  'default-2': [
-    { message: { role: 'user', content: locale.newAgiHybridInterface }, status: 'success' },
-    {
-      message: {
-        role: 'assistant',
-        content: locale.aiMessage_1,
-      },
-      status: 'success',
-    },
-  ],
-};
-
-export const DEFAULT_CONVERSATIONS_ITEMS = [
-  {
-    key: 'default-0',
-    label: locale.whatIsAntDesignX,
-    group: locale.today,
-  },
-];
-
 export const HOT_TOPICS = {
   key: '1',
   label: locale.hotTopics,

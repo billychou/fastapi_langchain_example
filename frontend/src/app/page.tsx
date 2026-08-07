@@ -38,28 +38,28 @@ import {
   XModelResponse,
   XRequest,
 } from '@ant-design/x-sdk';
-import { Avatar, Button, Dropdown, Flex, type GetProp, message, Pagination, Space, Spin } from 'antd';
-import dayjs from 'dayjs';
+import { Avatar, Button, Dropdown, Flex, type GetProp, Input, message, Modal, Pagination, Space, Spin } from 'antd';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import '@ant-design/x-markdown/themes/light.css';
 import '@ant-design/x-markdown/themes/dark.css';
 import { BubbleListRef } from '@ant-design/x/es/bubble';
-import { API_BASE, getValidAccessToken } from '@/lib/api';
+import { API_BASE, ApiError, getValidAccessToken, threadApi, type ThreadItem } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { useMarkdownTheme } from '@/x-markdown/demo/_utils';
 import {
   type ChatMessage,
-  DEFAULT_CONVERSATIONS_ITEMS,
   DESIGN_GUIDE,
-  HISTORY_MESSAGES,
   HOT_TOPICS,
   SENDER_PROMPTS,
   THOUGHT_CHAIN_CONFIG,
 } from './_utils/config';
 import { useStyle } from './_utils/styles';
 import locale from './_utils/local';
+
+// 后端 agent_threads.title 的默认值(首轮乐观更新标题与其保持一致)
+const DEFAULT_THREAD_TITLE = '新会话';
 
 // ==================== Context ====================
 const ChatContext = React.createContext<{
@@ -173,13 +173,26 @@ const providerFactory = (conversationKey: string) => {
             manual: true,
             params: {
             },
-            // 每次发起对话前注入最新 Access Token(临近过期自动无感续期)
+            // 每次发起对话前注入最新 Access Token(临近过期自动无感续期);
+            // body.messages 只保留最后一条(多轮记忆由后端 checkpointer 维护, 避免重复累积),
+            // 并强制注入 conversation_id(对应 agent_threads.thread_id)。
             middlewares: {
               onRequest: async (url, options) => {
                 const token = await getValidAccessToken();
                 const headers: Record<string, string> = { ...(options.headers || {}) };
                 if (token) headers.Authorization = `Bearer ${token}`;
-                return [url, { ...options, headers }];
+                let body = options.body;
+                try {
+                  const parsed = JSON.parse(String(options.body));
+                  if (Array.isArray(parsed?.messages) && parsed.messages.length > 1) {
+                    parsed.messages = [parsed.messages[parsed.messages.length - 1]];
+                  }
+                  parsed.conversation_id = conversationKey;
+                  body = JSON.stringify(parsed);
+                } catch {
+                  /* body 非 JSON 时保持原样 */
+                }
+                return [url, { ...options, headers, body }];
               },
             },
           },
@@ -190,8 +203,22 @@ const providerFactory = (conversationKey: string) => {
   return providerCaches.get(conversationKey);
 };
 
-const historyMessageFactory = (conversationKey: string): DefaultMessageInfo<ChatMessage>[] => {
-  return HISTORY_MESSAGES[conversationKey] || [];
+// 切换会话时从后端恢复历史消息(LangGraph checkpoint; 服务重启后为空)
+const fetchThreadHistory = async (info?: {
+  conversationKey?: string | number;
+}): Promise<DefaultMessageInfo<ChatMessage>[]> => {
+  const key = info?.conversationKey;
+  if (typeof key !== 'string' || !key) return [];
+  try {
+    const msgs = await threadApi.messages(key);
+    return msgs.map((m, idx) => ({
+      id: `history-${idx}`,
+      message: { role: m.role, content: m.content },
+      status: 'success' as const,
+    }));
+  } catch {
+    return [];
+  }
 };
 
 const getRole = (className: string): BubbleListProps['role'] => ({
@@ -252,8 +279,7 @@ const Independent: React.FC = () => {
     addConversation,
     setConversations,
   } = useXConversations({
-    defaultConversations: DEFAULT_CONVERSATIONS_ITEMS,
-    defaultActiveConversationKey: DEFAULT_CONVERSATIONS_ITEMS[0].key,
+    defaultConversations: [],
   });
 
   const [className] = useMarkdownTheme();
@@ -263,14 +289,28 @@ const Independent: React.FC = () => {
 
   const [inputValue, setInputValue] = useState('');
 
+  // 会话元数据(agent_threads)相关状态
+  const [threadsReady, setThreadsReady] = useState(false);
+  const [renameTarget, setRenameTarget] = useState<{ key: string; label: string } | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+
   const listRef = useRef<BubbleListRef>(null);
 
   // ==================== Runtime ====================
 
-  const { onRequest, messages, isRequesting, abort, onReload, setMessage } = useXChat<ChatMessage>({
-    provider: providerFactory(activeConversationKey), // every conversation has its own provider
+  const {
+    onRequest,
+    messages,
+    isRequesting,
+    abort,
+    onReload,
+    setMessage,
+    isDefaultMessagesRequesting,
+  } = useXChat<ChatMessage>({
+    // every conversation has its own provider
+    provider: activeConversationKey ? providerFactory(activeConversationKey) : undefined,
     conversationKey: activeConversationKey,
-    defaultMessages: historyMessageFactory(activeConversationKey),
+    defaultMessages: fetchThreadHistory,
     requestPlaceholder: () => {
       return {
         content: locale.noData,
@@ -299,7 +339,49 @@ const Independent: React.FC = () => {
     if (!initializing && !user) router.replace('/login');
   }, [initializing, user, router]);
 
-  if (initializing || !user) {
+  // ==================== Threads (agent_threads 元数据) ====================
+  const loadThreads = useCallback(async (): Promise<ThreadItem[]> => {
+    const items = await threadApi.list();
+    setConversations(items.map((t) => ({ key: t.thread_id, label: t.title })));
+    return items;
+  }, [setConversations]);
+
+  const createNewConversation = useCallback(async () => {
+    try {
+      const thread = await threadApi.create();
+      addConversation({ key: thread.thread_id, label: thread.title });
+      setActiveConversationKey(thread.thread_id);
+    } catch (err) {
+      messageApi.error(err instanceof ApiError ? err.message : locale.requestFailed);
+    }
+  }, [addConversation, setActiveConversationKey, messageApi]);
+
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const items = await loadThreads();
+        if (cancelled) return;
+        if (items.length > 0) {
+          setActiveConversationKey(items[0].thread_id);
+        } else {
+          await createNewConversation();
+        }
+      } catch (err) {
+        if (!cancelled) {
+          messageApi.error(err instanceof ApiError ? err.message : locale.requestFailed);
+        }
+      } finally {
+        if (!cancelled) setThreadsReady(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user, loadThreads, createNewConversation, messageApi, setActiveConversationKey]);
+
+  if (initializing || !user || !threadsReady) {
     return (
       <Flex align="center" justify="center" style={{ minHeight: '100vh' }}>
         <Spin size="large" />
@@ -309,12 +391,22 @@ const Independent: React.FC = () => {
 
   // ==================== Event ====================
   const onSubmit = (val: string) => {
-    if (!val) return;
+    if (!val || !activeConversationKey) return;
     onRequest({
       messages: [{ role: 'user', content: val }],
+      conversation_id: activeConversationKey,
     });
+    // 首轮: 标题仍为默认值时本地乐观更新(与后端规则一致: 取首条用户消息截断)
+    const active = conversations.find((c) => c.key === activeConversationKey);
+    const newTitle = val.trim().slice(0, 50);
+    if (active?.label === DEFAULT_THREAD_TITLE && newTitle) {
+      setConversations(
+        conversations.map((c) =>
+          c.key === activeConversationKey ? { ...c, label: newTitle } : c,
+        ),
+      );
+    }
     listRef.current?.scrollTo({ top: 'bottom' });
-    setActiveConversationKey(activeConversationKey);
   };
 
   // ==================== Nodes ====================
@@ -335,17 +427,7 @@ const Independent: React.FC = () => {
       <Conversations
         creation={{
           onClick: () => {
-            if (messages.length === 0) {
-              messageApi.error(locale.itIsNowANewConversation);
-              return;
-            }
-            const now = dayjs().valueOf().toString();
-            addConversation({
-              key: now,
-              label: `${locale.newConversation} ${conversations.length + 1}`,
-              group: locale.today,
-            });
-            setActiveConversationKey(now);
+            void createNewConversation();
           },
         }}
         items={conversations.map(({ key, label, ...other }) => ({
@@ -364,6 +446,13 @@ const Independent: React.FC = () => {
               label: locale.rename,
               key: 'rename',
               icon: <EditOutlined />,
+              onClick: () => {
+                setRenameValue(typeof conversation.label === 'string' ? conversation.label : '');
+                setRenameTarget({
+                  key: conversation.key,
+                  label: String(conversation.label ?? ''),
+                });
+              },
             },
             {
               label: locale.delete,
@@ -371,11 +460,14 @@ const Independent: React.FC = () => {
               icon: <DeleteOutlined />,
               danger: true,
               onClick: () => {
+                threadApi.remove(conversation.key).catch((err) => {
+                  messageApi.error(err instanceof ApiError ? err.message : locale.requestFailed);
+                });
                 const newList = conversations.filter((item) => item.key !== conversation.key);
-                const newKey = newList?.[0]?.key;
                 setConversations(newList);
                 if (conversation.key === activeConversationKey) {
-                  setActiveConversationKey(newKey);
+                  if (newList.length > 0) setActiveConversationKey(newList[0].key);
+                  else void createNewConversation();
                 }
               },
             },
@@ -418,7 +510,11 @@ const Independent: React.FC = () => {
 
   const chatList = (
     <div className={styles.chatList}>
-      {messages?.length ? (
+      {isDefaultMessagesRequesting ? (
+        <Flex align="center" justify="center" style={{ flex: 1, minHeight: 200 }}>
+          <Spin />
+        </Flex>
+      ) : messages?.length ? (
         /* 🌟 消息列表 */
         <Bubble.List
           ref={listRef}
@@ -585,6 +681,35 @@ const Independent: React.FC = () => {
     <XProvider locale={locale}>
       <ChatContext.Provider value={{ onReload, setMessage }}>
         {contextHolder}
+        <Modal
+          title={locale.rename}
+          open={!!renameTarget}
+          okButtonProps={{ disabled: !renameValue.trim() }}
+          onCancel={() => setRenameTarget(null)}
+          onOk={async () => {
+            if (!renameTarget) return;
+            const title = renameValue.trim();
+            if (!title) return;
+            try {
+              const updated = await threadApi.rename(renameTarget.key, title);
+              setConversations(
+                conversations.map((c) =>
+                  c.key === renameTarget.key ? { ...c, label: updated.title } : c,
+                ),
+              );
+              setRenameTarget(null);
+            } catch (err) {
+              messageApi.error(err instanceof ApiError ? err.message : locale.requestFailed);
+            }
+          }}
+          destroyOnClose
+        >
+          <Input
+            value={renameValue}
+            maxLength={255}
+            onChange={(e) => setRenameValue(e.target.value)}
+          />
+        </Modal>
         <div className={styles.layout}>
           {chatSide}
           <div className={styles.chat}>
