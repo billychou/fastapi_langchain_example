@@ -75,12 +75,13 @@ class JwtPermissionMiddleware(BaseHTTPMiddleware):
     """
 
     PUBLIC_PATHS = (
-        "/health",
+        "/api/health",
         "/api/v1/auth/login",
         "/api/v1/auth/register",
         "/api/v1/auth/refresh",
         "/api/v1/auth/sms/send",
         "/api/v1/auth/oauth/*",
+        "/api/chat",  # 聊天接口自带依赖注入鉴权, 全局中间件不重复校验
         "/docs",
         "/openapi.json",
     )

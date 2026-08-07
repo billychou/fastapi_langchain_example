@@ -25,6 +25,14 @@ uv run uvicorn app.main:app --reload --port 5001   # start dev server
 
 There are no tests configured. `httpx` is in the dev group for ad-hoc requests.
 
+### User & auth service (merged into backend)
+
+`backend/` also hosts an enterprise user & auth system (formerly standalone `auth_service/`): multi-identity accounts (phone/email/username/OAuth credentials decoupled from the account master table), dual-token JWT (15min Access + 30d Refresh with Redis-backed session registry, rotation + reuse detection), RBAC (user ↔ role ↔ permission/menu, `require_permissions(...)` dependencies), Argon2id password hashing, Redis token-bucket rate limiting, exponential login lockout, and PII field encryption (AES-256-GCM + HMAC blind indexes).
+
+- Auth routes live under `/api/v1` (auth / account / admin); chat (`/api/chat`) requires a valid Access Token when `CHAT_REQUIRE_AUTH=true` (default).
+- Local dev stack: `cd backend && docker compose up -d` (MySQL 8 + Redis 7; migrations auto-run on first boot). DDL and RBAC seeds are in `backend/migrations/`.
+- Config: `backend/app/config.py` merges LLM + auth settings; auth keys (`JWT_SECRET_KEY`, `PII_KEYS`, `PII_BLIND_INDEX_KEY`) are required for login to work — see `backend/.env.example`.
+
 ### Backend architecture
 
 `backend/app/main.py` is the FastAPI entrypoint. Two endpoints:
