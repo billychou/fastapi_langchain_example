@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  ApiOutlined,
   CloudUploadOutlined,
   DeleteOutlined,
   EditOutlined,
@@ -13,7 +14,11 @@ import {
   SyncOutlined,
   TeamOutlined,
 } from '@ant-design/icons';
-import type { BubbleListProps, ThoughtChainItemProps } from '@ant-design/x';
+import type {
+  BubbleListProps,
+  ThoughtChainItemProps,
+  ThoughtChainItemType,
+} from '@ant-design/x';
 import {
   Actions,
   Attachments,
@@ -32,6 +37,7 @@ import type { DefaultMessageInfo } from '@ant-design/x-sdk';
 import {
   DeepSeekChatProvider,
   type SSEFields,
+  type TransformMessage,
   useXChat,
   useXConversations,
   type XModelParams,
@@ -68,6 +74,7 @@ import {
 import { useAuth } from '@/lib/auth-context';
 import { useMarkdownTheme } from '@/x-markdown/demo/_utils';
 import {
+  type AgentEvent,
   type ChatMessage,
   DESIGN_GUIDE,
   HOT_TOPICS,
@@ -178,14 +185,61 @@ const Footer: React.FC<{
 
 // ==================== Chat Provider ====================
 /**
+ * DeepSeekChatProvider 扩展: 在解析文本/推理增量之外, 把 SSE `agent` 字段
+ * (后端 /api/chat 的工具链事件扩展, 基类只读 choices[].delta 故天然兼容)
+ * 累积到 extraInfo.agentEvents, 供 assistant 气泡头部渲染思维链。
+ */
+class ToolChainChatProvider extends DeepSeekChatProvider<
+  ChatMessage,
+  XModelParams,
+  Partial<Record<SSEFields, XModelResponse>>
+> {
+  transformMessage(
+    info: TransformMessage<
+      ChatMessage,
+      Partial<Record<SSEFields, XModelResponse>>
+    >,
+  ): ChatMessage {
+    const message = super.transformMessage(info);
+    const { originMessage, chunk, responseHeaders } = info;
+
+    let agentEvent: AgentEvent | undefined;
+    try {
+      let parsed: { agent?: AgentEvent } | undefined;
+      if (responseHeaders.get('content-type')?.includes('text/event-stream')) {
+        const data = (chunk as { data?: unknown })?.data;
+        if (typeof data === 'string' && data.trim() !== '[DONE]') {
+          parsed = JSON.parse(data);
+        }
+      } else {
+        parsed = chunk as { agent?: AgentEvent } | undefined;
+      }
+      agentEvent = parsed?.agent;
+    } catch {
+      agentEvent = undefined;
+    }
+
+    const previousEvents = originMessage?.extraInfo?.agentEvents ?? [];
+    const agentEvents = agentEvent
+      ? [...previousEvents, agentEvent]
+      : previousEvents;
+    if (agentEvents.length === 0) return message;
+    return {
+      ...message,
+      extraInfo: { ...originMessage?.extraInfo, agentEvents },
+    };
+  }
+}
+
+/**
  * 🔔 Please replace the BASE_URL, MODEL with your own values.
  */
-const providerCaches = new Map<string, DeepSeekChatProvider>();
+const providerCaches = new Map<string, ToolChainChatProvider>();
 const providerFactory = (conversationKey: string) => {
   if (!providerCaches.get(conversationKey)) {
     providerCaches.set(
       conversationKey,
-      new DeepSeekChatProvider({
+      new ToolChainChatProvider({
         request: XRequest<
           XModelParams,
           Partial<Record<SSEFields, XModelResponse>>
@@ -249,20 +303,68 @@ const fetchThreadHistory = async (info?: {
 const getRole = (className: string): BubbleListProps['role'] => ({
   assistant: {
     placement: 'start',
-    header: (_, { status }) => {
+    header: (_, { status, extraInfo }) => {
       const config =
         THOUGHT_CHAIN_CONFIG[status as keyof typeof THOUGHT_CHAIN_CONFIG];
-      return config ? (
-        <ThoughtChain.Item
+      const agentEvents = (extraInfo as ChatMessage['extraInfo'])?.agentEvents;
+      if (!agentEvents || agentEvents.length === 0) {
+        return config ? (
+          <ThoughtChain.Item
+            style={{
+              marginBottom: 8,
+            }}
+            status={config.status as ThoughtChainItemProps['status']}
+            variant="solid"
+            icon={<GlobalOutlined />}
+            title={config.title}
+          />
+        ) : null;
+      }
+      // 按工具调用 id 合并: tool_call → loading, 对应 tool_result 到达 → success
+      const steps = new Map<
+        string,
+        { name: string; status: 'loading' | 'success'; result?: string }
+      >();
+      for (const event of agentEvents) {
+        if (event.type === 'tool_call') {
+          steps.set(event.id, { name: event.name, status: 'loading' });
+        } else {
+          const pending = steps.get(event.id);
+          steps.set(event.id, {
+            name: event.name || pending?.name || '',
+            status: 'success',
+            result: event.result,
+          });
+        }
+      }
+      const items: ThoughtChainItemType[] = [...steps.entries()].map(
+        ([id, step]) => ({
+          key: `tool-${id}`,
+          icon: <ApiOutlined />,
+          title: step.name,
+          description:
+            step.status === 'success'
+              ? locale.toolReturned
+              : locale.toolExecuting,
+          status: step.status,
+          collapsible: !!step.result,
+          content: step.result,
+        }),
+      );
+      items.push({
+        key: 'model-status',
+        icon: <GlobalOutlined />,
+        title: config?.title,
+        status: config?.status as ThoughtChainItemProps['status'],
+      });
+      return (
+        <ThoughtChain
           style={{
             marginBottom: 8,
           }}
-          status={config.status as ThoughtChainItemProps['status']}
-          variant="solid"
-          icon={<GlobalOutlined />}
-          title={config.title}
+          items={items}
         />
-      ) : null;
+      );
     },
     footer: (content, { status, key, extraInfo }) => (
       <Footer
