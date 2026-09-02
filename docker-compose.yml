@@ -1,0 +1,80 @@
+# 全栈部署: MySQL + Redis + backend + frontend
+#
+# - 本地开发依赖请用 backend/docker-compose.yml(暴露 3306/6379 到宿主);
+#   本文件的 MySQL/Redis 仅 compose 网络内可达, 两者可同时运行不冲突。
+# - 默认 APP_ENV=dev + 演示密钥, 开箱即演示; 生产部署必须通过环境变量
+#   注入真实密钥并设 APP_ENV=production(后端启动闸门会拒绝弱密钥)。
+name: fastapi-langchain-example
+
+services:
+  mysql:
+    image: mysql:8.0
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_0900_ai_ci
+    environment:
+      MYSQL_ROOT_PASSWORD: root_dev_only
+      MYSQL_DATABASE: auth_service
+      MYSQL_USER: auth_user
+      MYSQL_PASSWORD: auth_pass_dev
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./backend/migrations:/docker-entrypoint-initdb.d:ro  # 首次启动自动建表+种子
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot_dev_only"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  backend:
+    build: ./backend
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      APP_ENV: ${APP_ENV:-dev}
+      DATABASE_URL: mysql+aiomysql://auth_user:auth_pass_dev@mysql:3306/auth_service?charset=utf8mb4
+      REDIS_URL: redis://redis:6379/0
+      CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+      CHAT_REQUIRE_AUTH: "true"
+      CHECKPOINT_DB_PATH: /data/agent_checkpoints.sqlite
+      # 演示默认值(仅 dev 生效); 生产必须覆盖: openssl rand -base64 48
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-REPLACE_WITH_openssl_rand_base64_48}
+      PII_KEYS: ${PII_KEYS:-k1:WnM9vicjEZwds16p/bvI3Ywaci4PKMEBl/tZVUl9Flc=,k2:n5QGr8jgOA1i+kZOGk03LgpL8eeEJ2tB5SZrJNb1tAw=}
+      PII_BLIND_INDEX_KEY: ${PII_BLIND_INDEX_KEY:-+Uj2zvu1ySBJ30/L5+YoPZxUWLztWyqhDKgu2aYh21s=}
+      # LLM: 不配置 Key 时自动降级 mock 模型
+      LLM_PROVIDER: ${LLM_PROVIDER:-openai}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    volumes:
+      - backend_data:/data
+    ports:
+      - "5001:5001"
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # 浏览器端直连后端, 需要宿主可达地址
+        NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-http://localhost:5001}
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+
+volumes:
+  mysql_data:
+  redis_data:
+  backend_data:

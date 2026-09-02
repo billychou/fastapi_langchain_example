@@ -35,6 +35,16 @@ The chat posts to `http://127.0.0.1:5001/api/chat` (override with `NEXT_PUBLIC_A
 
 Login is required: `/login` and `/register` handle authentication (dual-token JWT with automatic silent refresh); `/users` is the admin user-management page (account list + role assignment). The chat sidebar avatar menu shows the current user and logout.
 
+### Full-stack Docker deployment
+
+Run everything (MySQL + Redis + backend + frontend) with one command:
+
+```bash
+docker compose up -d --build   # backend on :5001, frontend on :3000
+```
+
+Defaults to `APP_ENV=dev` with demo secrets so it works out of the box. For production, inject real secrets (`JWT_SECRET_KEY`, `PII_KEYS`, `PII_BLIND_INDEX_KEY`, LLM keys) via environment variables and set `APP_ENV=production` — the backend refuses to boot on weak or placeholder keys. MySQL/Redis here are only reachable inside the compose network, so this stack can run alongside the dev-oriented `backend/docker-compose.yml`, which exposes 3306/6379 to the host. The frontend image inlines `NEXT_PUBLIC_API_BASE` at build time (default `http://localhost:5001`).
+
 ## Configuration
 
 Backend reads `backend/.env` (see `.env.example`). Key vars:
