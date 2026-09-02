@@ -37,7 +37,7 @@ Commit subjects are imperative, capitalized, unprefixed (e.g. `Add login and reg
 ## Security & Configuration Notes
 
 - Backend reads `backend/.env`, caching settings at startup — restart after edits. Never commit real keys; `.env` is gitignored.
-- Without an LLM key the server falls back to `MockChatModel`, so the agent loop works credential-free; agent memory is in-process and cleared on restart.
+- Without an LLM key the server falls back to `MockChatModel`, so the agent loop works credential-free. Conversation memory persists via the LangGraph checkpointer: `CHECKPOINT_BACKEND=sqlite` (default, local file) or `postgres` (requires `CHECKPOINT_DATABASE_URL`; the root `docker-compose.yml` ships a Postgres 16 service for it).
 - Keep `CORS_ORIGINS` in sync with the frontend port. The chat URL (`http://127.0.0.1:5001/api/chat`) is hardcoded in `frontend/src/app/page.tsx` — change it there.
 - This dev machine exports `UV_DEFAULT_INDEX` pointing at a China mirror. Any `uv` command (`uv sync`, `uv lock`, and also `uv run`, which re-locks on the fly) will silently rewrite `backend/uv.lock` URLs to the mirror unless prefixed with `UV_DEFAULT_INDEX=https://pypi.org/simple/`. CI rejects mirror-polluted lockfiles, so always run uv with that prefix here.
 

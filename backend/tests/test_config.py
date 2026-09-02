@@ -98,3 +98,25 @@ def test_cors_origin_list_splits_and_strips(clean_env):
     overrides = _strong() | {"cors_origins": "http://a.com, ,http://b.com"}
     settings = _production(**overrides)
     assert settings.cors_origin_list == ["http://a.com", "http://b.com"]
+
+
+def test_checkpoint_backend_defaults_to_sqlite(clean_env):
+    """零依赖开发体验: 不配置任何变量时会话记忆走本地 SQLite。"""
+    settings = Settings(_env_file=None, app_env="dev")
+    assert settings.checkpoint_backend == "sqlite"
+    assert settings.checkpoint_db_path.endswith(".sqlite")
+
+
+def test_checkpoint_backend_rejects_unknown_value(clean_env):
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, app_env="dev", checkpoint_backend="mysql")
+
+
+def test_checkpoint_backend_accepts_postgres(clean_env):
+    settings = Settings(
+        _env_file=None,
+        app_env="dev",
+        checkpoint_backend="postgres",
+        checkpoint_database_url="postgres://u:p@127.0.0.1:5432/langgraph",
+    )
+    assert settings.checkpoint_backend == "postgres"

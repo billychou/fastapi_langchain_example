@@ -20,6 +20,8 @@ dependencies = [
     "cryptography>=43.0",
     "email-validator>=2.1",
     "langgraph-checkpoint-sqlite>=3.1.1",
+    "langgraph-checkpoint-postgres>=3.1.2",
+    "psycopg[binary]>=3.1",
 ]
 
 [dependency-groups]
@@ -35,6 +37,10 @@ dev = [
 line-length = 100
 target-version = "py311"
 src = ["app", "tests"]
+
+[[tool.uv.index]]
+url = "https://pypi.org/simple/"
+default = true
 
 [tool.ruff.lint]
 # 首批启用规则集: 语法/风格/导入排序/常见 bug; 后续可逐步加严(如 S/D)

@@ -37,7 +37,7 @@ Login is required: `/login` and `/register` handle authentication (dual-token JW
 
 ### Full-stack Docker deployment
 
-Run everything (MySQL + Redis + backend + frontend) with one command:
+Run everything (MySQL for auth, Postgres for conversation memory, Redis, backend, frontend) with one command:
 
 ```bash
 docker compose up -d --build   # backend on :5001, frontend on :3000
@@ -57,6 +57,8 @@ Backend reads `backend/.env` (see `.env.example`). Key vars:
 | `ANTHROPIC_API_KEY` | | |
 | `SYSTEM_PROMPT` | | |
 | `CORS_ORIGINS` | comma-separated origins | Default includes `localhost:3000` and `localhost:5173` |
+| `CHECKPOINT_BACKEND` | `sqlite` / `postgres` | Conversation-memory store (LangGraph checkpointer). `sqlite` (default) keeps a local file via `CHECKPOINT_DB_PATH`; `postgres` for production / multi-replica |
+| `CHECKPOINT_DATABASE_URL` | `postgres://user:pass@host:5432/db` | Required when `CHECKPOINT_BACKEND=postgres`; `checkpoint_*` tables are created automatically on first boot |
 
 Settings are lru-cached at startup — restart after editing `.env`.
 

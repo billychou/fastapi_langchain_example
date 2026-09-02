@@ -9,6 +9,7 @@ import base64
 import binascii
 import logging
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -47,7 +48,9 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     system_prompt: str = DEFAULT_SYSTEM_PROMPT
     chat_require_auth: bool = True  # /api/chat 是否要求登录(企业默认开启)
-    checkpoint_db_path: str = "./agent_checkpoints.sqlite"  # LangGraph SQLite checkpointer 本地文件
+    checkpoint_backend: Literal["sqlite", "postgres"] = "sqlite"  # 会话记忆存储: sqlite(零依赖开发) / postgres(生产多副本)
+    checkpoint_db_path: str = "./agent_checkpoints.sqlite"  # sqlite 后端时的本地文件路径
+    checkpoint_database_url: str = ""  # postgres 后端必填, 如 postgres://user:pass@host:5432/langgraph
 
     # ================= 聊天接口保护 =================
     chat_max_messages: int = 100  # 单次请求消息条数上限
