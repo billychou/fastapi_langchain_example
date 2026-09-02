@@ -19,6 +19,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from app.config import get_settings
+from app.core.net import resolve_client_ip
 
 logger = logging.getLogger("auth.http")
 
@@ -44,7 +45,7 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
         logger.info(
             "%s %s -> %d (%.1fms) ip=%s rid=%s",
             request.method, request.url.path, response.status_code, cost_ms,
-            request.client.host if request.client else "-", request_id,
+            resolve_client_ip(request), request_id,
         )
         return response
 

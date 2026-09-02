@@ -1,6 +1,7 @@
 """管理端路由(RBAC 演示): 全部接口通过 require_permissions 声明式鉴权。"""
 from __future__ import annotations
 
+from app.core.net import resolve_client_ip
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, Field
 from redis.asyncio import Redis
@@ -88,7 +89,7 @@ async def assign_roles(
         action="role_grant",
         target_type="account",
         target_id=str(account.id),
-        ip=request.client.host if request.client else None,
+        ip=resolve_client_ip(request),
         user_agent=request.headers.get("User-Agent"),
         detail={"roles": final_roles},
     )
