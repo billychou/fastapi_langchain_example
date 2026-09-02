@@ -18,6 +18,12 @@ jobs:
         with:
           python-version: "3.13"
           enable-cache: true
+      - name: Verify lockfile uses public PyPI
+        run: |
+          if grep -qiE 'aliyun|tsinghua|douban' uv.lock; then
+            echo "::error::uv.lock contains mirror URLs. Regenerate with UV_DEFAULT_INDEX=https://pypi.org/simple/ uv lock"
+            exit 1
+          fi
       - name: Install dependencies
         run: uv sync --frozen
       - name: Lint (ruff)
