@@ -54,6 +54,7 @@ extend-immutable-calls = ["fastapi.Depends", "app.deps.require_permissions"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+pythonpath = ["."]  # package=false 项目不安装, 测试直接以仓库根为导入路径
 
 [tool.uv]
 package = false
