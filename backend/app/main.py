@@ -1,12 +1,15 @@
 """FastAPI entrypoint: SSE streaming chat + 用户认证/RBAC 一体化服务。
 
-- /api/health       健康检查(匿名)
+- /api/health       健康检查(匿名, 仅自述配置)
+- /live             存活探针(不触碰依赖)
+- /ready            就绪探针(MySQL/Redis 探测, 503 附失败依赖清单)
 - /api/chat         SSE 聊天(默认要求登录, CHAT_REQUIRE_AUTH 控制), 实现见 app/api/chat.py
 - /api/v1/auth/*    注册/登录/刷新/登出/改密/OAuth
 - /api/v1/account/* 当前用户资料与在线会话
 - /api/v1/admin/*   管理端(RBAC 权限点控制)
 """
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -14,12 +17,13 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
 
 from app.agent import close_checkpointer, init_checkpointer
 from app.api.chat import router as chat_router
 from app.api.v1.router import api_router
 from app.config import get_settings
-from app.db.redis import close_redis, init_redis
+from app.db.redis import close_redis, get_redis_client, init_redis
 from app.db.session import dispose_engine, get_engine
 from app.exceptions import BizCode, BizError
 from app.middleware.auth import build_middlewares
@@ -29,6 +33,8 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s :: %(message)s",
 )
 logger = logging.getLogger("api")
+
+_READY_PROBE_TIMEOUT = 2.0  # 就绪探针单依赖超时上限(秒)
 
 
 @asynccontextmanager
@@ -101,6 +107,39 @@ def create_app() -> FastAPI:
             "provider": settings.llm_provider,
             "model": settings.llm_model,
         }
+
+    @app.get("/live")
+    async def live() -> dict[str, str]:
+        """存活探针: 进程能响应即返回 200, 不触碰任何依赖。"""
+        return {"status": "ok"}
+
+    @app.get("/ready")
+    async def ready() -> JSONResponse:
+        """就绪探针: 依赖(MySQL/Redis)可用才返回 200, 供编排系统摘流量。
+
+        Redis 不可用时服务虽能降级运行, 但认证与限流失效, 因此这里如实上报,
+        由编排方决定是否摘除流量。探测均有超时上限, 不会拖慢探针本身。
+        """
+        problems: list[str] = []
+        try:
+            async with asyncio.timeout(_READY_PROBE_TIMEOUT):
+                async with get_engine().connect() as conn:
+                    await conn.execute(text("SELECT 1"))
+        except Exception as exc:  # noqa: BLE001 - 探针只上报类别, 不泄露细节
+            problems.append(f"mysql: {type(exc).__name__}")
+        redis = get_redis_client()
+        if redis is not None:
+            try:
+                async with asyncio.timeout(_READY_PROBE_TIMEOUT):
+                    await redis.ping()
+            except Exception as exc:  # noqa: BLE001
+                problems.append(f"redis: {type(exc).__name__}")
+        if problems:
+            return JSONResponse(
+                {"code": int(BizCode.INTERNAL), "message": "readiness check failed", "data": problems},
+                status_code=503,
+            )
+        return JSONResponse({"code": int(BizCode.OK), "message": "ok", "data": None})
 
     # ---------------- 路由 ----------------
     app.include_router(chat_router, prefix="/api")  # /api/chat: SSE 聊天

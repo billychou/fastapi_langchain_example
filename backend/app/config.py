@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     # ================= LLM (聊天 Agent) =================
     llm_provider: str = "openai"  # openai | anthropic | mock
     llm_model: str = "gpt-4o-mini"
+    llm_timeout_seconds: float = 60.0  # 单次 LLM 请求超时(含流式), 防止上游挂死拖垮 SSE 连接
     openai_api_key: str = ""
     openai_base_url: str = ""
     anthropic_api_key: str = ""

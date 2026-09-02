@@ -227,14 +227,22 @@ def build_chat_model(settings: Settings) -> BaseChatModel:
             raise RuntimeError("LLM_PROVIDER=anthropic 但未配置 ANTHROPIC_API_KEY")
         from langchain_anthropic import ChatAnthropic
 
-        return ChatAnthropic(model=settings.llm_model, api_key=settings.anthropic_api_key)
+        return ChatAnthropic(
+            model=settings.llm_model,
+            api_key=settings.anthropic_api_key,
+            timeout=settings.llm_timeout_seconds,
+        )
 
     if provider == "openai":
         if not settings.openai_api_key:
             raise RuntimeError("LLM_PROVIDER=openai 但未配置 OPENAI_API_KEY")
         from langchain_openai import ChatOpenAI
 
-        kwargs = {"model": settings.llm_model, "api_key": settings.openai_api_key}
+        kwargs = {
+            "model": settings.llm_model,
+            "api_key": settings.openai_api_key,
+            "timeout": settings.llm_timeout_seconds,  # 上游挂死时快速失败, 由聊天路由兜底提示
+        }
         if settings.openai_base_url:
             kwargs["base_url"] = settings.openai_base_url
         return ChatOpenAI(**kwargs)

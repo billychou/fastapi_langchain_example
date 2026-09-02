@@ -81,6 +81,8 @@ In the docker-compose stack, run migrations from the backend container: `docker 
 { "status": "ok", "provider": "openai", "model": "gpt-4o-mini" }
 ```
 
+`GET /live` (liveness: always 200 if the process serves) and `GET /ready` (readiness: probes MySQL + Redis with a 2s cap; 503 with the failing dependency list when degraded) are provided for orchestrators. The compose backend image uses `/ready` as its Docker HEALTHCHECK.
+
 ### `POST /api/chat`
 Requires `Authorization: Bearer <access_token>` when `CHAT_REQUIRE_AUTH=true` (default). Request body (OpenAI-style):
 ```json

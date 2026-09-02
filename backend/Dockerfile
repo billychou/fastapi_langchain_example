@@ -27,7 +27,8 @@ USER appuser
 VOLUME /data
 
 EXPOSE 5001
-HEALTHCHECK --interval=10s --timeout=3s --start-period=10s --retries=12 \
-  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5001/api/health', timeout=2)" || exit 1
+# 就绪探针作 HEALTHCHECK: 依赖失联时容器标记 unhealthy, 便于编排观测
+HEALTHCHECK --interval=10s --timeout=3s --start-period=15s --retries=12 \
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5001/ready', timeout=2)" || exit 1
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "5001"]
