@@ -107,11 +107,11 @@ Hardening (all tunable via env):
 
 ## Architecture notes
 
-- **Agent** — `backend/app/agent.py` `get_agent()` (lru-cached): `create_agent(model, tools=ALL_TOOLS, system_prompt, checkpointer=InMemorySaver())`. Multi-turn memory lives in-process; restart clears it.
+- **Agent** — `backend/app/agent.py` `get_agent()` (lru-cached): `create_agent(model, tools=ALL_TOOLS, system_prompt, checkpointer)`. Conversation memory is persisted by a LangGraph checkpointer: SQLite by default (`CHECKPOINT_BACKEND=sqlite`), PostgreSQL in compose/production (`CHECKPOINT_BACKEND=postgres`), schema managed via Alembic for the app tables and auto-created `checkpoint_*` tables.
 - **Mock model** — `MockChatModel` streams canned replies and emits demo tool calls for time/weather/math. Lets the UI run end-to-end with no credentials. Check `GET /api/health` `provider` field to confirm which model is active.
 - **Tools** (`backend/app/tools.py`) — `get_current_time`, `calculate` (AST-based safe eval, not `eval`), `get_weather` (mock data).
-- **SSE format** — OpenAI-style chunks so `@ant-design/x-sdk`'s `DeepSeekChatProvider` parses them directly. Tool calls/results from the agent are not surfaced in the stream; the agent emits a final text message after any tool loop, which is what the UI renders.
-- **Frontend provider** — One `DeepSeekChatProvider` per conversation key, cached in `providerCaches`. `useXChat` manages streaming state, retry, abort.
+- **SSE format** — OpenAI-style chunks so `@ant-design/x-sdk`'s `DeepSeekChatProvider` parses them directly. On top of `choices[].delta`, each event may carry an `agent` field (`tool_call`/`tool_result`) that the UI renders as a thought chain; clients that only read deltas ignore it.
+- **Frontend provider** — One `ToolChainChatProvider` (a `DeepSeekChatProvider` subclass that accumulates the `agent` tool-chain events) per conversation key, cached in `providerCaches`. `useXChat` manages streaming state, retry, abort.
 - **Next.js 16 caveat** — This repo's Next.js has breaking changes vs. prior versions; see `frontend/AGENTS.md` before touching Next.js-specific code.
 
 - **User & auth** — merged into the backend: account/credential/profile split, Redis session registry for refresh tokens (instant revocation on logout/kick/password change), Argon2id hashing, token-bucket rate limiting, RBAC dependencies (`require_permissions`). See `backend/docs/architecture.md`.

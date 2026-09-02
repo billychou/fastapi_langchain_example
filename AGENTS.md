@@ -28,7 +28,7 @@ Frontend (`pnpm` 10, from `frontend/`):
 
 ## Testing Guidelines
 
-No test suite exists on either side. Verify manually: run both apps and exercise the chat flow — try "现在几点了" to test the tool-call loop in mock mode. Check the active model via `provider` on `GET /api/health`.
+Backend: `uv run pytest -q` (69 tests; `tests/conftest.py` freezes MySQL/Redis/LLM to mocks/dead ports, no external deps needed) + `uv run ruff check .`. CI (`.github/workflows/ci.yml`) runs backend ruff+pytest and frontend lint+build, and rejects mirror URLs in `uv.lock` (regenerate with `UV_DEFAULT_INDEX=https://pypi.org/simple/ uv lock`). Frontend has no test runner — verify with `pnpm lint` + `pnpm build`, then run both apps and exercise the chat flow — try "现在几点了" to test the tool-call loop (and the tool-chain thought-chain UI) in mock mode. Check the active model via `provider` on `GET /api/health`.
 
 ## Commit & Pull Request Guidelines
 
