@@ -692,7 +692,9 @@ const Independent: React.FC = () => {
             key: i.id,
             status: i.status,
             loading: i.status === 'loading',
-            extraInfo: i.extraInfo,
+            // provider 将工具链事件写入 message.extraInfo, 而反馈等交互写入
+            // MessageInfo.extraInfo; 两者合并后传给气泡 header/footer。
+            extraInfo: { ...i.message.extraInfo, ...i.extraInfo },
           }))}
           styles={{
             root: {
