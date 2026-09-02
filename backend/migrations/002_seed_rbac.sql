@@ -2,7 +2,7 @@
 -- RBAC 初始化种子数据: 内置角色 / API 权限 / 菜单 / 授权关系
 -- 执行前置: 001_schema.sql
 -- =====================================================================
-USE `fastapi_langchain_example`;
+USE `auth_service`;
 
 -- ---- 内置角色 --------------------------------------------------------
 INSERT INTO `role` (`role_code`, `role_name`, `description`, `is_builtin`) VALUES
