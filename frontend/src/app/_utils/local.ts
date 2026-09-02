@@ -66,11 +66,13 @@ const zhCN = {
   checkSomeKnowledge: '查看知识',
   aboutReact: '关于 React',
   aboutAntDesign: '关于 Ant Design',
-  messageIsRequesting: '消息正在请求中，您可以在请求完成后创建新对话或立即中止...',
+  messageIsRequesting:
+    '消息正在请求中，您可以在请求完成后创建新对话或立即中止...',
   clickOrDragFilesToThisAreaToUpload: '点击或将文件拖到此处上传',
   more: '更多',
   helloImAntDesignX: '你好，我是 Ant Design X',
-  baseOnAntDesign: '基于 Ant Design，AGI 产品界面解决方案，创造更智能的视觉体验~',
+  baseOnAntDesign:
+    '基于 Ant Design，AGI 产品界面解决方案，创造更智能的视觉体验~',
   iCanHelp: '我可以帮助：',
 
   // 历史消息内容
@@ -104,7 +106,8 @@ const zhCN = {
 const enUS = {
   whatIsAntDesignX: 'What is Ant Design X?',
   today: 'Today',
-  howToQuicklyInstallAndImportComponents: 'How to quickly install and import components?',
+  howToQuicklyInstallAndImportComponents:
+    'How to quickly install and import components?',
   newAgiHybridInterface: 'New AGI Hybrid Interface',
   yesterday: 'Yesterday',
   hotTopics: 'Hot Topics',
@@ -119,11 +122,13 @@ const enUS = {
   installationIntroduction: 'Installation Introduction',
   whatHasAntDesignXUpgraded: 'What has Ant Design X upgraded?',
   whatComponentsAreInAntDesignX: 'What components are in Ant Design X?',
-  comeAndDiscoverNewDesignParadigm: 'Come and discover the new design paradigm of the AI era.',
+  comeAndDiscoverNewDesignParadigm:
+    'Come and discover the new design paradigm of the AI era.',
   requestFailedPleaseTryAgain: 'Request failed, please try again!',
   requestAborted: 'Request aborted',
   requestFailed: 'Request failed, please try again!',
-  requestIsInProgress: 'Request is in progress, please wait for the request to complete.',
+  requestIsInProgress:
+    'Request is in progress, please wait for the request to complete.',
   rename: 'Rename',
   delete: 'Delete',
   uploadFile: 'Upload File',
@@ -131,9 +136,11 @@ const enUS = {
   uploadFiles: 'Upload files',
   clickOrDragFilesToUpload: 'Click or drag files to this area to upload',
   askOrInputUseSkills: 'Ask or input / use skills',
-  aiUnderstandsUserNeedsAndProvidesSolutions: 'AI understands user needs and provides solutions.',
+  aiUnderstandsUserNeedsAndProvidesSolutions:
+    'AI understands user needs and provides solutions.',
   aiPublicPersonAndImage: "AI's public persona and image",
-  howAICanExpressItselfWayUsersUnderstand: 'How AI Can Express Itself in a Way Users Understand',
+  howAICanExpressItselfWayUsersUnderstand:
+    'How AI Can Express Itself in a Way Users Understand',
   aiBalances: 'AI balances "chat" & "do" behaviors.',
   deepThink: 'Deep Think',
   deepThinking: 'Deep Thinking',
@@ -165,7 +172,8 @@ const enUS = {
   aboutAntDesign: 'About Ant Design',
   messageIsRequesting:
     'Message is Requesting, you can create a new conversation after request done or abort it right now...',
-  clickOrDragFilesToThisAreaToUpload: 'Click or drag files to this area to upload',
+  clickOrDragFilesToThisAreaToUpload:
+    'Click or drag files to this area to upload',
   more: 'More',
   helloImAntDesignX: "Hello, I'm Ant Design X",
   baseOnAntDesign:
@@ -200,7 +208,6 @@ const enUS = {
   },
 };
 
-
 export const isZhCN = (() => {
   // 1. 服务端环境直接返回 false
   if (typeof window === 'undefined') return false;
@@ -216,5 +223,9 @@ export const isZhCN = (() => {
 })();
 
 export default isZhCN
-  ? ({ ...zhCN_antd, ...zhCN, ...zhCN_X } as typeof zhCN_antd & typeof zhCN & typeof zhCN_X)
-  : ({ ...enUS_antd, ...enUS, ...enUS_X } as typeof enUS_antd & typeof enUS & typeof enUS_X);
+  ? ({ ...zhCN_antd, ...zhCN, ...zhCN_X } as typeof zhCN_antd &
+      typeof zhCN &
+      typeof zhCN_X)
+  : ({ ...enUS_antd, ...enUS, ...enUS_X } as typeof enUS_antd &
+      typeof enUS &
+      typeof enUS_X);

@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 import {
   CloudUploadOutlined,
@@ -7,11 +7,11 @@ import {
   EllipsisOutlined,
   GlobalOutlined,
   LogoutOutlined,
-  TeamOutlined,
   PaperClipOutlined,
   QuestionCircleOutlined,
   ShareAltOutlined,
   SyncOutlined,
+  TeamOutlined,
 } from '@ant-design/icons';
 import type { BubbleListProps, ThoughtChainItemProps } from '@ant-design/x';
 import {
@@ -31,21 +31,40 @@ import XMarkdown from '@ant-design/x-markdown';
 import type { DefaultMessageInfo } from '@ant-design/x-sdk';
 import {
   DeepSeekChatProvider,
-  SSEFields,
+  type SSEFields,
   useXChat,
   useXConversations,
-  XModelParams,
-  XModelResponse,
+  type XModelParams,
+  type XModelResponse,
   XRequest,
 } from '@ant-design/x-sdk';
-import { Avatar, Button, Dropdown, Flex, type GetProp, Input, message, Modal, Pagination, Space, Spin } from 'antd';
+import {
+  Avatar,
+  Button,
+  Dropdown,
+  Flex,
+  type GetProp,
+  Input,
+  Modal,
+  message,
+  Pagination,
+  Space,
+  Spin,
+} from 'antd';
+import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import '@ant-design/x-markdown/themes/light.css';
 import '@ant-design/x-markdown/themes/dark.css';
-import { BubbleListRef } from '@ant-design/x/es/bubble';
-import { API_BASE, ApiError, getValidAccessToken, threadApi, type ThreadItem } from '@/lib/api';
+import type { BubbleListRef } from '@ant-design/x/es/bubble';
+import {
+  API_BASE,
+  ApiError,
+  getValidAccessToken,
+  type ThreadItem,
+  threadApi,
+} from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { useMarkdownTheme } from '@/x-markdown/demo/_utils';
 import {
@@ -55,8 +74,8 @@ import {
   SENDER_PROMPTS,
   THOUGHT_CHAIN_CONFIG,
 } from './_utils/config';
-import { useStyle } from './_utils/styles';
 import locale from './_utils/local';
+import { useStyle } from './_utils/styles';
 
 // 后端 agent_threads.title 的默认值(首轮乐观更新标题与其保持一致)
 const DEFAULT_THREAD_TITLE = '新会话';
@@ -167,36 +186,42 @@ const providerFactory = (conversationKey: string) => {
     providerCaches.set(
       conversationKey,
       new DeepSeekChatProvider({
-        request: XRequest<XModelParams, Partial<Record<SSEFields, XModelResponse>>>(
-          `${API_BASE}/api/chat`,
-          {
-            manual: true,
-            params: {
-            },
-            // 每次发起对话前注入最新 Access Token(临近过期自动无感续期);
-            // body.messages 只保留最后一条(多轮记忆由后端 checkpointer 维护, 避免重复累积),
-            // 并强制注入 conversation_id(对应 agent_threads.thread_id)。
-            middlewares: {
-              onRequest: async (url, options) => {
-                const token = await getValidAccessToken();
-                const headers: Record<string, string> = { ...(options.headers || {}) };
-                if (token) headers.Authorization = `Bearer ${token}`;
-                let body = options.body;
-                try {
-                  const parsed = JSON.parse(String(options.body));
-                  if (Array.isArray(parsed?.messages) && parsed.messages.length > 1) {
-                    parsed.messages = [parsed.messages[parsed.messages.length - 1]];
-                  }
-                  parsed.conversation_id = conversationKey;
-                  body = JSON.stringify(parsed);
-                } catch {
-                  /* body 非 JSON 时保持原样 */
+        request: XRequest<
+          XModelParams,
+          Partial<Record<SSEFields, XModelResponse>>
+        >(`${API_BASE}/api/chat`, {
+          manual: true,
+          params: {},
+          // 每次发起对话前注入最新 Access Token(临近过期自动无感续期);
+          // body.messages 只保留最后一条(多轮记忆由后端 checkpointer 维护, 避免重复累积),
+          // 并强制注入 conversation_id(对应 agent_threads.thread_id)。
+          middlewares: {
+            onRequest: async (url, options) => {
+              const token = await getValidAccessToken();
+              const headers: Record<string, string> = {
+                ...(options.headers || {}),
+              };
+              if (token) headers.Authorization = `Bearer ${token}`;
+              let body = options.body;
+              try {
+                const parsed = JSON.parse(String(options.body));
+                if (
+                  Array.isArray(parsed?.messages) &&
+                  parsed.messages.length > 1
+                ) {
+                  parsed.messages = [
+                    parsed.messages[parsed.messages.length - 1],
+                  ];
                 }
-                return [url, { ...options, headers, body }];
-              },
+                parsed.conversation_id = conversationKey;
+                body = JSON.stringify(parsed);
+              } catch {
+                /* body 非 JSON 时保持原样 */
+              }
+              return [url, { ...options, headers, body }];
             },
           },
-        ),
+        }),
       }),
     );
   }
@@ -225,7 +250,8 @@ const getRole = (className: string): BubbleListProps['role'] => ({
   assistant: {
     placement: 'start',
     header: (_, { status }) => {
-      const config = THOUGHT_CHAIN_CONFIG[status as keyof typeof THOUGHT_CHAIN_CONFIG];
+      const config =
+        THOUGHT_CHAIN_CONFIG[status as keyof typeof THOUGHT_CHAIN_CONFIG];
       return config ? (
         <ThoughtChain.Item
           style={{
@@ -246,8 +272,9 @@ const getRole = (className: string): BubbleListProps['role'] => ({
         id={key as string}
       />
     ),
-    contentRender: (content: any, { status }) => {
-      const newContent = content.replace(/\n\n/g, '<br/><br/>');
+    contentRender: (content: React.ReactNode, { status }) => {
+      const text = typeof content === 'string' ? content : '';
+      const newContent = text.replace(/\n\n/g, '<br/><br/>');
       return (
         <XMarkdown
           paragraphTag="div"
@@ -285,13 +312,18 @@ const Independent: React.FC = () => {
   const [className] = useMarkdownTheme();
   const [messageApi, contextHolder] = message.useMessage();
   const [attachmentsOpen, setAttachmentsOpen] = useState(false);
-  const [attachedFiles, setAttachedFiles] = useState<GetProp<typeof Attachments, 'items'>>([]);
+  const [attachedFiles, setAttachedFiles] = useState<
+    GetProp<typeof Attachments, 'items'>
+  >([]);
 
   const [inputValue, setInputValue] = useState('');
 
   // 会话元数据(agent_threads)相关状态
   const [threadsReady, setThreadsReady] = useState(false);
-  const [renameTarget, setRenameTarget] = useState<{ key: string; label: string } | null>(null);
+  const [renameTarget, setRenameTarget] = useState<{
+    key: string;
+    label: string;
+  } | null>(null);
   const [renameValue, setRenameValue] = useState('');
 
   const listRef = useRef<BubbleListRef>(null);
@@ -308,7 +340,9 @@ const Independent: React.FC = () => {
     isDefaultMessagesRequesting,
   } = useXChat<ChatMessage>({
     // every conversation has its own provider
-    provider: activeConversationKey ? providerFactory(activeConversationKey) : undefined,
+    provider: activeConversationKey
+      ? providerFactory(activeConversationKey)
+      : undefined,
     conversationKey: activeConversationKey,
     defaultMessages: fetchThreadHistory,
     requestPlaceholder: () => {
@@ -352,7 +386,9 @@ const Independent: React.FC = () => {
       addConversation({ key: thread.thread_id, label: thread.title });
       setActiveConversationKey(thread.thread_id);
     } catch (err) {
-      messageApi.error(err instanceof ApiError ? err.message : locale.requestFailed);
+      messageApi.error(
+        err instanceof ApiError ? err.message : locale.requestFailed,
+      );
     }
   }, [addConversation, setActiveConversationKey, messageApi]);
 
@@ -370,7 +406,9 @@ const Independent: React.FC = () => {
         }
       } catch (err) {
         if (!cancelled) {
-          messageApi.error(err instanceof ApiError ? err.message : locale.requestFailed);
+          messageApi.error(
+            err instanceof ApiError ? err.message : locale.requestFailed,
+          );
         }
       } finally {
         if (!cancelled) setThreadsReady(true);
@@ -379,7 +417,13 @@ const Independent: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [user, loadThreads, createNewConversation, messageApi, setActiveConversationKey]);
+  }, [
+    user,
+    loadThreads,
+    createNewConversation,
+    messageApi,
+    setActiveConversationKey,
+  ]);
 
   if (initializing || !user || !threadsReady) {
     return (
@@ -414,7 +458,7 @@ const Independent: React.FC = () => {
     <div className={styles.side}>
       {/* 🌟 Logo */}
       <div className={styles.logo}>
-        <img
+        <Image
           src="https://mdn.alipayobjects.com/huamei_iwk9zp/afts/img/A*eco6RrQhxbMAAAAAAAAAAAAADgCCAQ/original"
           draggable={false}
           alt="logo"
@@ -432,7 +476,10 @@ const Independent: React.FC = () => {
         }}
         items={conversations.map(({ key, label, ...other }) => ({
           key,
-          label: key === activeConversationKey ? `[${locale.curConversation}]${label}` : label,
+          label:
+            key === activeConversationKey
+              ? `[${locale.curConversation}]${label}`
+              : label,
           ...other,
         }))}
         className={styles.conversations}
@@ -447,7 +494,11 @@ const Independent: React.FC = () => {
               key: 'rename',
               icon: <EditOutlined />,
               onClick: () => {
-                setRenameValue(typeof conversation.label === 'string' ? conversation.label : '');
+                setRenameValue(
+                  typeof conversation.label === 'string'
+                    ? conversation.label
+                    : '',
+                );
                 setRenameTarget({
                   key: conversation.key,
                   label: String(conversation.label ?? ''),
@@ -461,12 +512,19 @@ const Independent: React.FC = () => {
               danger: true,
               onClick: () => {
                 threadApi.remove(conversation.key).catch((err) => {
-                  messageApi.error(err instanceof ApiError ? err.message : locale.requestFailed);
+                  messageApi.error(
+                    err instanceof ApiError
+                      ? err.message
+                      : locale.requestFailed,
+                  );
                 });
-                const newList = conversations.filter((item) => item.key !== conversation.key);
+                const newList = conversations.filter(
+                  (item) => item.key !== conversation.key,
+                );
                 setConversations(newList);
                 if (conversation.key === activeConversationKey) {
-                  if (newList.length > 0) setActiveConversationKey(newList[0].key);
+                  if (newList.length > 0)
+                    setActiveConversationKey(newList[0].key);
                   else void createNewConversation();
                 }
               },
@@ -489,7 +547,12 @@ const Independent: React.FC = () => {
                     },
                   ]
                 : []),
-              { key: 'logout', icon: <LogoutOutlined />, label: '退出登录', danger: true },
+              {
+                key: 'logout',
+                icon: <LogoutOutlined />,
+                label: '退出登录',
+                danger: true,
+              },
             ],
             onClick: ({ key }) => {
               if (key === 'logout') {
@@ -511,7 +574,11 @@ const Independent: React.FC = () => {
   const chatList = (
     <div className={styles.chatList}>
       {isDefaultMessagesRequesting ? (
-        <Flex align="center" justify="center" style={{ flex: 1, minHeight: 200 }}>
+        <Flex
+          align="center"
+          justify="center"
+          style={{ flex: 1, minHeight: 200 }}
+        >
           <Spin />
         </Flex>
       ) : messages?.length ? (
@@ -570,7 +637,8 @@ const Independent: React.FC = () => {
                 list: { height: '100%' },
                 item: {
                   flex: 1,
-                  backgroundImage: 'linear-gradient(123deg, #e5f4ff 0%, #efe7ff 100%)',
+                  backgroundImage:
+                    'linear-gradient(123deg, #e5f4ff 0%, #efe7ff 100%)',
                   borderRadius: 12,
                   border: 'none',
                 },
@@ -587,7 +655,8 @@ const Independent: React.FC = () => {
               styles={{
                 item: {
                   flex: 1,
-                  backgroundImage: 'linear-gradient(123deg, #e5f4ff 0%, #efe7ff 100%)',
+                  backgroundImage:
+                    'linear-gradient(123deg, #e5f4ff 0%, #efe7ff 100%)',
                   borderRadius: 12,
                   border: 'none',
                 },
@@ -694,12 +763,16 @@ const Independent: React.FC = () => {
               const updated = await threadApi.rename(renameTarget.key, title);
               setConversations(
                 conversations.map((c) =>
-                  c.key === renameTarget.key ? { ...c, label: updated.title } : c,
+                  c.key === renameTarget.key
+                    ? { ...c, label: updated.title }
+                    : c,
                 ),
               );
               setRenameTarget(null);
             } catch (err) {
-              messageApi.error(err instanceof ApiError ? err.message : locale.requestFailed);
+              messageApi.error(
+                err instanceof ApiError ? err.message : locale.requestFailed,
+              );
             }
           }}
           destroyOnClose

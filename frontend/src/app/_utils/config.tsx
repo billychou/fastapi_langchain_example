@@ -8,8 +8,7 @@ import {
   ScheduleOutlined,
   SmileOutlined,
 } from '@ant-design/icons';
-import type { ActionsFeedbackProps } from '@ant-design/x';
-import { Prompts } from '@ant-design/x';
+import type { ActionsFeedbackProps, Prompts } from '@ant-design/x';
 import type { XModelMessage } from '@ant-design/x-sdk';
 import type { GetProp } from 'antd';
 import locale from './local';

@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 /**
  * 全局认证上下文: 登录态、当前用户、登录/注册/登出动作。
@@ -10,7 +10,7 @@ import {
   useEffect,
   useMemo,
   useState,
-} from "react";
+} from 'react';
 import {
   type AccountInfo,
   authApi,
@@ -19,7 +19,7 @@ import {
   type LoginParams,
   type RegisterParams,
   setTokens,
-} from "./api";
+} from './api';
 
 interface AuthContextValue {
   user: AccountInfo | null;
@@ -96,7 +96,7 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({
     () => ({
       user,
       initializing,
-      isAdmin: !!user?.roles?.includes("admin"),
+      isAdmin: !!user?.roles?.includes('admin'),
       login,
       register,
       logout,
@@ -110,6 +110,6 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({
 
 export function useAuth(): AuthContextValue {
   const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error("useAuth 必须在 <AuthProvider> 内使用");
+  if (!ctx) throw new Error('useAuth 必须在 <AuthProvider> 内使用');
   return ctx;
 }
