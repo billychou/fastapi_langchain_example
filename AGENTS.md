@@ -5,7 +5,7 @@ FastAPI + LangChain agent backend (SSE chat, dual-token JWT auth + RBAC) with a 
 ## Project Structure & Module Organization
 
 - `backend/app/` — FastAPI source: `main.py`, `agent.py`, `tools.py`, `config.py`, plus `core/`, `services/`, `models/`, `schemas/`, `api/v1/`, `db/`, `middleware/`.
-- `backend/migrations/` — MySQL DDL + RBAC seed SQL. `backend/docker-compose.yml` — local MySQL 8 + Redis 7. `backend/docs/architecture.md` — diagrams and token flows.
+- `backend/migrations/` — fresh-database bootstrap SQL (DDL + RBAC seed + alembic version stamp). `backend/alembic/` — Alembic migrations; all schema changes after bootstrap go here (`uv run alembic revision --autogenerate`, then `uv run alembic upgrade head`). `backend/docker-compose.yml` — local MySQL 8 + Redis 7. `backend/docs/architecture.md` — diagrams and token flows.
 - `frontend/src/app/` — App Router pages: `page.tsx` (chat), `login/`, `register/`, `users/`. `frontend/src/lib/` — auth context, API client. `frontend/public/` — static assets.
 
 ## Build, Test, and Development Commands

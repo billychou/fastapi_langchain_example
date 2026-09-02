@@ -30,7 +30,8 @@ backend/
 │   ├── middleware/      # RequestId / 安全头 / 全局RBAC(演示)
 │   ├── api/v1/          # auth / account / admin 路由
 │   └── schemas/         # chat / auth / 统一信封
-├── migrations/          # MySQL DDL + RBAC 种子数据
+├── migrations/          # 初始建库: MySQL DDL + RBAC 种子 + alembic 版本标记
+├── alembic/             # 模式迁移的唯一事实来源(增量变更走这里)
 ├── docs/architecture.md # 架构图 + 双 Token 时序图
 └── docker-compose.yml   # 本地 MySQL 8.0 + Redis 7
 ```
@@ -48,9 +49,16 @@ uv run uvicorn app.main:app --reload --port 5001
 # 开发环境: http://127.0.0.1:5001/docs
 ```
 
-> 已有 MySQL 实例时需手动执行：`mysql < migrations/001_schema.sql`、
-> `mysql < migrations/002_seed_rbac.sql`、`mysql < migrations/003_agent_threads.sql`，
-> 并按 `.env.example` 调整 `DATABASE_URL`。
+> 已有 MySQL 实例时需手动执行 `migrations/` 下的 001–004 脚本（004 用于打上
+> alembic 版本标记），并按 `.env.example` 调整 `DATABASE_URL`。
+>
+> **模式变更一律通过 Alembic 增量迁移**（初始建库脚本不再修改）：
+>
+> ```bash
+> uv run alembic revision --autogenerate -m "Add xxx"  # 生成迁移, 人工复核
+> uv run alembic upgrade head                          # 应用到数据库
+> uv run alembic current                               # 查看当前版本
+> ```
 
 ## 接口速览
 

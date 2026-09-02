@@ -62,6 +62,18 @@ Backend reads `backend/.env` (see `.env.example`). Key vars:
 
 Settings are lru-cached at startup — restart after editing `.env`.
 
+### Schema migrations (Alembic)
+
+`backend/migrations/` only bootstraps a **fresh** database (DDL + RBAC seed + an `alembic_version` stamp). Every later schema change is an Alembic migration under `backend/alembic/`:
+
+```bash
+cd backend
+uv run alembic revision --autogenerate -m "Add xxx"   # review the generated file
+uv run alembic upgrade head                           # apply
+```
+
+In the docker-compose stack, run migrations from the backend container: `docker compose exec backend alembic upgrade head`.
+
 ## API
 
 ### `GET /api/health`

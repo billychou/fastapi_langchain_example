@@ -13,8 +13,10 @@ ENV UV_COMPILE_BYTECODE=1 \
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
-# 代码层
+# 代码层 + Alembic 迁移(容器内执行 `alembic upgrade head` 用)
 COPY app ./app
+COPY alembic ./alembic
+COPY alembic.ini ./
 RUN uv sync --frozen --no-dev
 
 # 非 root 运行 + checkpointer 数据目录
