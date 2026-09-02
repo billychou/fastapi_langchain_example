@@ -25,6 +25,7 @@ from langchain_core.messages import (
     HumanMessage,
     SystemMessage,
 )
+from redis.exceptions import RedisError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent import close_checkpointer, get_agent, init_checkpointer
@@ -130,11 +131,15 @@ def create_app() -> FastAPI:
         # 限流: 登录按账号/匿名按 IP; Redis 不可用时跳过并告警(演示降级模式)
         redis = get_redis_client()
         if redis is not None:
-            await enforce_chat_rate(
-                redis,
-                account_id=ctx.account_id if ctx is not None else None,
-                ip=resolve_client_ip(raw_request),
-            )
+            try:
+                await enforce_chat_rate(
+                    redis,
+                    account_id=ctx.account_id if ctx is not None else None,
+                    ip=resolve_client_ip(raw_request),
+                )
+            except RedisError as exc:
+                # Redis 启动后宕机: 限流降级放行, 保证聊天可用性(与 lifespan 降级策略一致)
+                logger.warning("Redis 不可用, 聊天限流未生效: %s", exc)
         else:
             logger.warning("Redis 不可用, 聊天限流未生效")
 
