@@ -9,6 +9,7 @@
 
 import json
 import logging
+import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -28,12 +29,15 @@ from langchain_core.messages import (
 from app.agent import close_checkpointer, get_agent, init_checkpointer
 from app.api.v1.router import api_router
 from app.config import get_settings
-from app.db.redis import close_redis, init_redis
+from app.core.net import resolve_client_ip
+from app.core.ratelimit import enforce_chat_rate
+from app.db.redis import close_redis, get_redis_client, init_redis
 from app.db.session import dispose_engine, get_db, get_engine
 from app.deps import AuthContext, get_current_optional
 from app.exceptions import BizCode, BizError
 from app.middleware.auth import build_middlewares
 from app.schemas import ChatRequest, MessageType
+from app.schemas.chat import DEFAULT_CONVERSATION_ID
 from app.services import thread_service
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -119,16 +123,31 @@ def create_app() -> FastAPI:
     @app.post("/api/chat")
     async def chat(
         request: ChatRequest,
+        raw_request: Request,
         ctx: AuthContext | None = Depends(get_current_optional),
         db: AsyncSession = Depends(get_db),
     ) -> StreamingResponse:
+        # 限流: 登录按账号/匿名按 IP; Redis 不可用时跳过并告警(演示降级模式)
+        redis = get_redis_client()
+        if redis is not None:
+            await enforce_chat_rate(
+                redis,
+                account_id=ctx.account_id if ctx is not None else None,
+                ip=resolve_client_ip(raw_request),
+            )
+        else:
+            logger.warning("Redis 不可用, 聊天限流未生效")
+
+        thread_id = request.conversation_id
         if ctx is not None:
-            if len(request.conversation_id) > thread_service.THREAD_ID_MAX:
-                raise BizError(BizCode.BAD_REQUEST, "conversation_id 过长(最长 64 字符)")
             # 会话元数据行不存在则自动创建(首次聊天即建档); 他人会话 → 404
-            await thread_service.ensure_thread(db, ctx.account_id, request.conversation_id)
+            await thread_service.ensure_thread(db, ctx.account_id, thread_id)
+        elif thread_id == DEFAULT_CONVERSATION_ID:
+            # 匿名 + 默认会话号: 每请求随机生成, 防止陌生人共享同一 checkpointer
+            # 记忆; 显式传 conversation_id 视为有意的共享会话。
+            thread_id = uuid.uuid4().hex
         return StreamingResponse(
-            chat_events(request, ctx, db),
+            chat_events(request, ctx, db, thread_id, raw_request),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -181,7 +200,11 @@ def _to_langchain_messages(messages: list[MessageType]) -> list[BaseMessage]:
 
 
 async def chat_events(
-    request: ChatRequest, ctx: AuthContext | None, db: AsyncSession
+    request: ChatRequest,
+    ctx: AuthContext | None,
+    db: AsyncSession,
+    thread_id: str,
+    raw_request: Request,
 ) -> AsyncIterator[str]:
     """Stream the agent's reply as OpenAI-style SSE chunks.
 
@@ -192,14 +215,15 @@ async def chat_events(
     final text message after any tool loop, which is what the UI renders.
 
     The stream is terminated with `data: [DONE]`. If the agent raises,
-    the error message is appended as a final content delta so it surfaces
-    in the chat bubble instead of being silently dropped.
+    a sanitized notice (with request-id for tracing) is appended as a final
+    content delta; the raw exception only goes to server logs.
 
     登录态下, 一轮成功结束后更新 agent_threads 元数据(标题/预览/时间);
     元数据写入失败不影响 SSE 输出。
+
+    thread_id 由路由层决定: 登录用会话 ID; 匿名未显式指定时为每请求随机值。
     """
     agent = await get_agent()
-    thread_id = request.conversation_id
     config = {"configurable": {"thread_id": thread_id}}
 
     first_user_text = next(
@@ -218,9 +242,16 @@ async def chat_events(
                 if text:
                     assistant_parts.append(text)
                     yield sse({"choices": [{"delta": {"content": text}}]})
-    except Exception as exc:  # noqa: BLE001 - surface any agent error to the client
+    except Exception:  # noqa: BLE001 - 完整错误仅落服务端日志, 客户端只收脱敏消息
         logger.exception("Agent stream failed")
-        yield sse({"choices": [{"delta": {"content": f"\n\n[Agent 调用失败: {exc}]"}}]})
+        request_id = getattr(raw_request.state, "request_id", "-")
+        yield sse(
+            {
+                "choices": [
+                    {"delta": {"content": f"\n\n[服务暂时不可用, 请稍后重试 (request_id: {request_id})]"}}
+                ]
+            }
+        )
     else:
         if ctx is not None:
             await thread_service.record_exchange(

@@ -103,6 +103,20 @@ async def enforce_sms_rate(redis: Redis, *, ip: str, phone: str) -> None:
         raise RateLimitError("今日验证码次数已用尽", 3600)
 
 
+async def enforce_chat_rate(redis: Redis, *, account_id: int | None, ip: str) -> None:
+    """/api/chat 限流: LLM 调用是最高成本入口, 登录按账号/匿名按 IP 分桶。"""
+    s = get_settings()
+    key = f"rl:chat:acct:{account_id}" if account_id is not None else f"rl:chat:ip:{ip}"
+    bucket = TokenBucket(redis)
+    if not await bucket.allow(
+        key, capacity=s.rl_chat_capacity, refill_per_min=s.rl_chat_refill_per_min
+    ):
+        raise RateLimitError(
+            "聊天请求过于频繁, 请稍后再试",
+            _retry_after_hint(s.rl_chat_capacity, s.rl_chat_refill_per_min),
+        )
+
+
 class LoginGuard:
     """登录失败锁定: 窗口计数 → 锁定, 锁定时长随锁定次数指数递增。"""
 

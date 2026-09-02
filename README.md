@@ -66,7 +66,14 @@ Requires `Authorization: Bearer <access_token>` when `CHAT_REQUIRE_AUTH=true` (d
 }
 ```
 
-Response: `text/event-stream`. Each line is `data: {"choices":[{"delta":{"content":"..."}}]}`, terminated by `data: [DONE]`. If the agent raises mid-stream, the error message is appended as a final content delta so it surfaces in the chat bubble. Conversation memory is keyed by `conversation_id` (LangGraph `thread_id`).
+Response: `text/event-stream`. Each line is `data: {"choices":[{"delta":{"content":"..."}}]}`, terminated by `data: [DONE]`. If the agent raises mid-stream, a **sanitized** notice (request-id only; the raw exception stays in server logs) is appended as a final content delta. Conversation memory is keyed by `conversation_id` (LangGraph `thread_id`).
+
+Hardening (all tunable via env):
+
+- Input caps: `CHAT_MAX_MESSAGES` (default 100) and `CHAT_MAX_MESSAGE_CHARS` (default 32000); `conversation_id` is limited to 64 chars.
+- Rate limiting: token bucket per account (logged in) or per client IP (anonymous) — `RL_CHAT_CAPACITY` / `RL_CHAT_REFILL_PER_MIN`. Requires Redis; skipped with a warning when Redis is down.
+- Anonymous isolation: with `CHAT_REQUIRE_AUTH=false` and no explicit `conversation_id`, each request gets a random one-off thread id so strangers never share checkpoint memory. An explicitly provided `conversation_id` is honored (intentional shared session).
+- Behind a reverse proxy set `TRUSTED_PROXY_HOPS=1` so rate limiting/audit resolve the real client IP from `X-Forwarded-For`.
 
 ### User & auth (`/api/v1`)
 
