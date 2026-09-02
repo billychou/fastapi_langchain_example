@@ -5,6 +5,7 @@
 - REDIS_URL 死端口 → lifespan 探活失败仅告警, 请求时限流捕获 RedisError 降级放行;
 - 匿名 + 默认会话号 → 每请求随机 thread_id, 不触碰 MySQL/共享记忆。
 """
+
 from __future__ import annotations
 
 import json
@@ -54,11 +55,25 @@ def test_chat_sse_streams_reply_and_done(client):
     assert "服务暂时不可用" not in content
 
 
+def _agent_events(text: str) -> list[dict]:
+    events: list[dict] = []
+    for line in text.splitlines():
+        if not line.startswith("data: ") or line == "data: [DONE]":
+            continue
+        payload = json.loads(line[len("data: ") :])
+        if payload.get("agent"):
+            events.append(payload["agent"])
+    return events
+
+
 def test_chat_tool_call_loop(client):
     """'现在几点了' 触发 mock 工具调用循环, 最终仍有文本回答。"""
     response = client.post(
         "/api/chat",
-        json={"messages": [{"role": "user", "content": "现在几点了"}], "conversation_id": "smoke-2"},
+        json={
+            "messages": [{"role": "user", "content": "现在几点了"}],
+            "conversation_id": "smoke-2",
+        },
     )
     assert response.status_code == 200
     assert "data: [DONE]" in response.text
@@ -67,13 +82,47 @@ def test_chat_tool_call_loop(client):
     assert "服务暂时不可用" not in content
 
 
+def test_chat_streams_tool_chain_events(client):
+    """工具循环同时产出配对的 tool_call/tool_result 思维链事件。
+
+    事件顺序必须是 tool_call 在前、同 id 的 tool_result 在后;
+    文本 delta 与事件共存, 且纯文本消息不产生事件。
+    """
+    response = client.post(
+        "/api/chat",
+        json={
+            "messages": [{"role": "user", "content": "现在几点了"}],
+            "conversation_id": "smoke-3",
+        },
+    )
+    assert response.status_code == 200
+    events = _agent_events(response.text)
+    calls = [e for e in events if e["type"] == "tool_call"]
+    results = [e for e in events if e["type"] == "tool_result"]
+    assert calls and results
+    assert calls[0]["name"] == "get_current_time"
+    assert results[0]["name"] == "get_current_time"
+    assert results[0]["result"]
+    # 配对: tool_call 必须先于同 id 的 tool_result 出现
+    first_call = next(i for i, e in enumerate(events) if e["type"] == "tool_call")
+    first_result = next(
+        i for i, e in enumerate(events) if e["type"] == "tool_result" and e["id"] == calls[0]["id"]
+    )
+    assert first_call < first_result
+
+    # 纯文本回复(无工具)不应携带任何事件
+    plain = client.post(
+        "/api/chat",
+        json={"messages": [{"role": "user", "content": "你好"}], "conversation_id": "smoke-4"},
+    )
+    assert _agent_events(plain.text) == []
+
+
 def test_chat_rejects_oversized_input(client):
     from app.config import get_settings
 
     oversized = "x" * (get_settings().chat_max_message_chars + 1)
-    response = client.post(
-        "/api/chat", json={"messages": [{"role": "user", "content": oversized}]}
-    )
+    response = client.post("/api/chat", json={"messages": [{"role": "user", "content": oversized}]})
     assert response.status_code == 400
     body = response.json()
     assert body["code"] == 40000

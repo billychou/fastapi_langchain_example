@@ -3,6 +3,7 @@
 路径保持 /api/chat(不带 /v1): 前端与 OpenAI 风格 SSE 协议均按此约定对接。
 登录态由 get_current_optional 控制(CHAT_REQUIRE_AUTH), 限流/匿名隔离策略见路由实现。
 """
+
 from __future__ import annotations
 
 import json
@@ -19,6 +20,7 @@ from langchain_core.messages import (
     BaseMessage,
     HumanMessage,
     SystemMessage,
+    ToolMessage,
 )
 from redis.exceptions import RedisError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -55,6 +57,45 @@ def _chunk_text(content: Any) -> str:
                 parts.append(block.get("text", ""))
         return "".join(parts)
     return ""
+
+
+# 工具结果回传前端时的最大字符数: 结果仅用于思维链展示, 超长截断防止 SSE 膨胀
+_TOOL_RESULT_MAX_CHARS = 2000
+
+
+def _tool_events(message: BaseMessage) -> list[dict[str, Any]]:
+    """Extract UI-facing tool-chain events from one completed agent message.
+
+    - ``AIMessage`` with ``tool_calls`` → one ``tool_call`` event per call;
+    - ``ToolMessage`` → one ``tool_result`` event (content truncated).
+
+    Returns an empty list for plain text messages, so callers can yield
+    unconditionally without filtering.
+    """
+    events: list[dict[str, Any]] = []
+    if isinstance(message, AIMessage):
+        for call in message.tool_calls or []:
+            events.append(
+                {
+                    "type": "tool_call",
+                    "id": call.get("id") or "",
+                    "name": call.get("name") or "",
+                    "args": call.get("args") or {},
+                }
+            )
+    elif isinstance(message, ToolMessage):
+        result = _chunk_text(message.content)
+        if len(result) > _TOOL_RESULT_MAX_CHARS:
+            result = result[:_TOOL_RESULT_MAX_CHARS] + "…"
+        events.append(
+            {
+                "type": "tool_result",
+                "id": message.tool_call_id or "",
+                "name": message.name or "",
+                "result": result,
+            }
+        )
+    return events
 
 
 def _to_langchain_messages(messages: list[MessageType]) -> list[BaseMessage]:
@@ -129,9 +170,17 @@ async def chat_events(
 
     Each `data:` line is a JSON object of shape
     `{"choices": [{"delta": {"content": "..."}}]}`, matching what
-    `@ant-design/x-sdk`'s `DeepSeekChatProvider` parses. Tool calls and
-    tool results from the agent are not surfaced — the agent will emit a
-    final text message after any tool loop, which is what the UI renders.
+    `@ant-design/x-sdk`'s `DeepSeekChatProvider` parses (it only reads
+    `choices[].delta.content/reasoning_content`, so extra fields are
+    backward compatible).
+
+    Tool-chain visibility: besides text deltas, the stream carries agent
+    events on the top-level `agent` field —
+    `{"choices": [{"delta": {}}], "agent": {"type": "tool_call"|"tool_result",
+    "id": ..., "name": ..., "args"|"result": ...}}`. `tool_call` is emitted
+    when the model node finishes a message that requests tools; `tool_result`
+    when the tools node finishes (result text truncated). UIs can render a
+    thought chain from them; older clients simply ignore the field.
 
     The stream is terminated with `data: [DONE]`. If the agent raises,
     a sanitized notice (with request-id for tracing) is appended as a final
@@ -145,29 +194,40 @@ async def chat_events(
     agent = await get_agent()
     config = {"configurable": {"thread_id": thread_id}}
 
-    first_user_text = next(
-        (m.content for m in reversed(request.messages) if m.role == "user"), ""
-    )
+    first_user_text = next((m.content for m in reversed(request.messages) if m.role == "user"), "")
     assistant_parts: list[str] = []
 
     try:
-        async for chunk, _metadata in agent.astream(
+        # messages 模式输出 LLM token 增量 (chunk, metadata);
+        # updates 模式输出节点级完整消息, 用于提取工具调用/结果事件。
+        async for mode, chunk in agent.astream(
             {"messages": _to_langchain_messages(request.messages)},
             config=config,
-            stream_mode="messages",
+            stream_mode=["messages", "updates"],
         ):
-            if isinstance(chunk, AIMessageChunk):
-                text = _chunk_text(chunk.content)
-                if text:
-                    assistant_parts.append(text)
-                    yield sse({"choices": [{"delta": {"content": text}}]})
+            if mode == "messages":
+                message_chunk, _metadata = chunk
+                if isinstance(message_chunk, AIMessageChunk):
+                    text = _chunk_text(message_chunk.content)
+                    if text:
+                        assistant_parts.append(text)
+                        yield sse({"choices": [{"delta": {"content": text}}]})
+            else:  # mode == "updates": {node: {"messages": [...]}}
+                for node_output in chunk.values():
+                    for message in (node_output or {}).get("messages", []):
+                        for event in _tool_events(message):
+                            yield sse({"choices": [{"delta": {}}], "agent": event})
     except Exception:  # noqa: BLE001 - 完整错误仅落服务端日志, 客户端只收脱敏消息
         logger.exception("Agent stream failed")
         request_id = getattr(raw_request.state, "request_id", "-")
         yield sse(
             {
                 "choices": [
-                    {"delta": {"content": f"\n\n[服务暂时不可用, 请稍后重试 (request_id: {request_id})]"}}
+                    {
+                        "delta": {
+                            "content": f"\n\n[服务暂时不可用, 请稍后重试 (request_id: {request_id})]"
+                        }
+                    }
                 ]
             }
         )
