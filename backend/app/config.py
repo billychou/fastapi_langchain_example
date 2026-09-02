@@ -113,7 +113,7 @@ class Settings(BaseSettings):
 
     # ------------------------------------------------------------------
     @model_validator(mode="after")
-    def _assert_production_secrets(self) -> "Settings":
+    def _assert_production_secrets(self) -> Settings:
         """密钥安全闸门:
 
         - 生产环境(APP_ENV=production): JWT/PII 密钥缺失、过短或仍是 .env.example

@@ -13,12 +13,12 @@ from app.db.session import get_db
 from app.deps import AuthContext, get_current, get_redis
 from app.exceptions import AuthError, BizCode
 from app.schemas import (
+    ChangePasswordRequest,
     LoginRequest,
     LogoutRequest,
     OAuthCallbackRequest,
     RefreshRequest,
     RegisterRequest,
-    ChangePasswordRequest,
     SmsSendRequest,
     TokenPairResponse,
 )

@@ -1,13 +1,13 @@
 """管理端路由(RBAC 演示): 全部接口通过 require_permissions 声明式鉴权。"""
 from __future__ import annotations
 
-from app.core.net import resolve_client_ip
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, Field
 from redis.asyncio import Redis
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.net import resolve_client_ip
 from app.db.session import get_db
 from app.deps import AuthContext, get_redis, require_permissions
 from app.exceptions import BizCode, BizError

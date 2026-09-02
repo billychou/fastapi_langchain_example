@@ -25,6 +25,7 @@ from langchain_core.messages import (
     HumanMessage,
     SystemMessage,
 )
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent import close_checkpointer, get_agent, init_checkpointer
 from app.api.v1.router import api_router
@@ -39,7 +40,6 @@ from app.middleware.auth import build_middlewares
 from app.schemas import ChatRequest, MessageType
 from app.schemas.chat import DEFAULT_CONVERSATION_ID
 from app.services import thread_service
-from sqlalchemy.ext.asyncio import AsyncSession
 
 logging.basicConfig(
     level=logging.INFO,

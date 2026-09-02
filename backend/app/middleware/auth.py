@@ -110,9 +110,9 @@ class JwtPermissionMiddleware(BaseHTTPMiddleware):
         if not self._enabled or self._is_public(request.url.path):
             return await call_next(request)
 
+        from app.core import tokens
         from app.db.redis import get_redis_client
         from app.db.session import get_session_factory
-        from app.core import tokens
         from app.exceptions import AuthError, BizCode
         from app.services import rbac_service
         from app.services.session_store import SessionStore

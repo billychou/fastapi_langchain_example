@@ -7,8 +7,8 @@
 """
 from __future__ import annotations
 
-import hmac
 import hashlib
+import hmac
 import os
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -60,7 +60,7 @@ def decrypt_field(blob: bytes, key_id: str) -> str:
 
 def blind_index(value: str, purpose: str) -> str:
     """HMAC-SHA256 盲索引: purpose 隔离手机/邮箱/证件命名空间。"""
-    mac = hmac.new(_blind_key(), f"{purpose}:{value}".encode("utf-8"), hashlib.sha256)
+    mac = hmac.new(_blind_key(), f"{purpose}:{value}".encode(), hashlib.sha256)
     return mac.hexdigest()
 
 

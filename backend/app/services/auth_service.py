@@ -25,7 +25,7 @@ from app.exceptions import AuthError, BizCode, BizError
 from app.models.account import Account, UserProfile
 from app.models.credential import AuthCredential
 from app.models.rbac import AccountRole, Role
-from app.services import audit_service, rbac_service
+from app.services import audit_service
 from app.services.session_store import SessionStore, new_session_id
 
 logger = logging.getLogger("auth.service")
