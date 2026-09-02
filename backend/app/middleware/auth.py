@@ -7,6 +7,7 @@
 FastAPI 工程实践首选 deps.require_permissions 依赖注入式鉴权;
 JwtPermissionMiddleware 展示的是"网关/全局拦截器"形态, 适合存量路由统一收口。
 """
+
 from __future__ import annotations
 
 import logging
@@ -19,6 +20,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from app.config import get_settings
+from app.core.log import request_id_var
 from app.core.net import resolve_client_ip
 
 logger = logging.getLogger("auth.http")
@@ -32,22 +34,29 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         request_id = request.headers.get(REQUEST_ID_HEADER) or uuid.uuid4().hex
         request.state.request_id = request_id
-        start = time.perf_counter()
+        # 写入 contextvars: 同一请求内后续日志(含访问日志与 agent/LLM 调用链)
+        # 自动携带; 协程/子任务继承上下文副本, reset 不影响已派生任务。
+        token = request_id_var.set(request_id)
         try:
-            response = await call_next(request)
-        except Exception:
-            logger.exception(
-                "unhandled error: %s %s rid=%s", request.method, request.url.path, request_id
+            start = time.perf_counter()
+            try:
+                response = await call_next(request)
+            except Exception:
+                logger.exception("unhandled error: %s %s", request.method, request.url.path)
+                raise
+            cost_ms = (time.perf_counter() - start) * 1000
+            response.headers[REQUEST_ID_HEADER] = request_id
+            logger.info(
+                "%s %s -> %d (%.1fms) ip=%s",
+                request.method,
+                request.url.path,
+                response.status_code,
+                cost_ms,
+                resolve_client_ip(request),
             )
-            raise
-        cost_ms = (time.perf_counter() - start) * 1000
-        response.headers[REQUEST_ID_HEADER] = request_id
-        logger.info(
-            "%s %s -> %d (%.1fms) ip=%s rid=%s",
-            request.method, request.url.path, response.status_code, cost_ms,
-            resolve_client_ip(request), request_id,
-        )
-        return response
+            return response
+        finally:
+            request_id_var.reset(token)
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -58,7 +67,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("Referrer-Policy", "no-referrer")
-        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+        response.headers.setdefault(
+            "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+        )
         if "/auth" in request.url.path:
             response.headers.setdefault("Cache-Control", "no-store")
             response.headers.setdefault("Pragma", "no-cache")
@@ -132,7 +143,10 @@ class JwtPermissionMiddleware(BaseHTTPMiddleware):
         redis = get_redis_client()
         sessions = SessionStore(redis)
         account_id, sid, jti = int(payload["sub"]), payload["sid"], payload["jti"]
-        if await sessions.is_access_blacklisted(jti) or await sessions.get_session(account_id, sid) is None:
+        if (
+            await sessions.is_access_blacklisted(jti)
+            or await sessions.get_session(account_id, sid) is None
+        ):
             return deny(401, BizCode.SESSION_REVOKED, "登录状态已失效")
 
         perm_required = self._match_permission(request.method, request.url.path)

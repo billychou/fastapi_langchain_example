@@ -23,15 +23,12 @@ from app.agent import close_checkpointer, init_checkpointer
 from app.api.chat import router as chat_router
 from app.api.v1.router import api_router
 from app.config import get_settings
+from app.core.log import setup_logging
 from app.db.redis import close_redis, get_redis_client, init_redis
 from app.db.session import dispose_engine, get_engine
 from app.exceptions import BizCode, BizError
 from app.middleware.auth import build_middlewares
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s :: %(message)s",
-)
 logger = logging.getLogger("api")
 
 _READY_PROBE_TIMEOUT = 2.0  # 就绪探针单依赖超时上限(秒)
@@ -56,6 +53,7 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     settings = get_settings()
+    setup_logging(fmt=settings.log_format, app_env=settings.app_env)
     app = FastAPI(
         title="LangChain Agent Chat API",
         version="0.2.0",
@@ -96,7 +94,8 @@ def create_app() -> FastAPI:
     async def unhandled_handler(request: Request, exc: Exception) -> JSONResponse:
         logger.exception("unhandled exception: %s %s", request.method, request.url.path)
         return JSONResponse(
-            {"code": int(BizCode.INTERNAL), "message": "服务内部错误", "data": None}, status_code=500
+            {"code": int(BizCode.INTERNAL), "message": "服务内部错误", "data": None},
+            status_code=500,
         )
 
     # ---------------- 基础设施 ----------------
@@ -136,7 +135,11 @@ def create_app() -> FastAPI:
                 problems.append(f"redis: {type(exc).__name__}")
         if problems:
             return JSONResponse(
-                {"code": int(BizCode.INTERNAL), "message": "readiness check failed", "data": problems},
+                {
+                    "code": int(BizCode.INTERNAL),
+                    "message": "readiness check failed",
+                    "data": problems,
+                },
                 status_code=503,
             )
         return JSONResponse({"code": int(BizCode.OK), "message": "ok", "data": None})
