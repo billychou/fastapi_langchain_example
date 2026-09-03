@@ -15,6 +15,8 @@ services:
       MYSQL_DATABASE: auth_service
       MYSQL_USER: auth_user
       MYSQL_PASSWORD: auth_pass_dev
+    ports:
+      - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
       - ./backend/migrations:/docker-entrypoint-initdb.d:ro  # 首次启动自动建表+种子
@@ -41,6 +43,8 @@ services:
       POSTGRES_USER: langgraph
       POSTGRES_PASSWORD: langgraph_dev_only
       POSTGRES_DB: langgraph
+    ports:
+      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -74,6 +78,7 @@ services:
       PII_BLIND_INDEX_KEY: ${PII_BLIND_INDEX_KEY:-+Uj2zvu1ySBJ30/L5+YoPZxUWLztWyqhDKgu2aYh21s=}
       # LLM: 不配置 Key 时自动降级 mock 模型
       LLM_PROVIDER: ${LLM_PROVIDER:-openai}
+      LLM_MODEL: ${LLM_MODEL:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
