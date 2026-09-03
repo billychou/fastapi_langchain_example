@@ -7,6 +7,7 @@ from redis.asyncio import Redis
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.net import resolve_client_ip
 from app.db.session import get_db
 from app.deps import AuthContext, get_redis, require_permissions
 from app.exceptions import BizCode, BizError
@@ -88,7 +89,7 @@ async def assign_roles(
         action="role_grant",
         target_type="account",
         target_id=str(account.id),
-        ip=request.client.host if request.client else None,
+        ip=resolve_client_ip(request),
         user_agent=request.headers.get("User-Agent"),
         detail={"roles": final_roles},
     )

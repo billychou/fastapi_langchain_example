@@ -5,7 +5,7 @@ FastAPI + LangChain agent backend (SSE chat, dual-token JWT auth + RBAC) with a 
 ## Project Structure & Module Organization
 
 - `backend/app/` — FastAPI source: `main.py`, `agent.py`, `tools.py`, `config.py`, plus `core/`, `services/`, `models/`, `schemas/`, `api/v1/`, `db/`, `middleware/`.
-- `backend/migrations/` — MySQL DDL + RBAC seed SQL. `backend/docker-compose.yml` — local MySQL 8 + Redis 7. `backend/docs/architecture.md` — diagrams and token flows.
+- `backend/migrations/` — fresh-database bootstrap SQL (DDL + RBAC seed + alembic version stamp). `backend/alembic/` — Alembic migrations; all schema changes after bootstrap go here (`uv run alembic revision --autogenerate`, then `uv run alembic upgrade head`). `backend/docker-compose.yml` — local MySQL 8 + Redis 7. `backend/docs/architecture.md` — diagrams and token flows.
 - `frontend/src/app/` — App Router pages: `page.tsx` (chat), `login/`, `register/`, `users/`. `frontend/src/lib/` — auth context, API client. `frontend/public/` — static assets.
 
 ## Build, Test, and Development Commands
@@ -28,7 +28,7 @@ Frontend (`pnpm` 10, from `frontend/`):
 
 ## Testing Guidelines
 
-No test suite exists on either side. Verify manually: run both apps and exercise the chat flow — try "现在几点了" to test the tool-call loop in mock mode. Check the active model via `provider` on `GET /api/health`.
+Backend: `uv run pytest -q` (69 tests; `tests/conftest.py` freezes MySQL/Redis/LLM to mocks/dead ports, no external deps needed) + `uv run ruff check .`. CI (`.github/workflows/ci.yml`) runs backend ruff+pytest and frontend lint+build, and rejects mirror URLs in `uv.lock` (regenerate with `UV_DEFAULT_INDEX=https://pypi.org/simple/ uv lock`). Frontend has no test runner — verify with `pnpm lint` + `pnpm build`, then run both apps and exercise the chat flow — try "现在几点了" to test the tool-call loop (and the tool-chain thought-chain UI) in mock mode. Check the active model via `provider` on `GET /api/health`.
 
 ## Commit & Pull Request Guidelines
 
@@ -37,8 +37,9 @@ Commit subjects are imperative, capitalized, unprefixed (e.g. `Add login and reg
 ## Security & Configuration Notes
 
 - Backend reads `backend/.env`, caching settings at startup — restart after edits. Never commit real keys; `.env` is gitignored.
-- Without an LLM key the server falls back to `MockChatModel`, so the agent loop works credential-free; agent memory is in-process and cleared on restart.
+- Without an LLM key the server falls back to `MockChatModel`, so the agent loop works credential-free. Conversation memory persists via the LangGraph checkpointer: `CHECKPOINT_BACKEND=sqlite` (default, local file) or `postgres` (requires `CHECKPOINT_DATABASE_URL`; the root `docker-compose.yml` ships a Postgres 16 service for it).
 - Keep `CORS_ORIGINS` in sync with the frontend port. The chat URL (`http://127.0.0.1:5001/api/chat`) is hardcoded in `frontend/src/app/page.tsx` — change it there.
+- This dev machine exports `UV_DEFAULT_INDEX` pointing at a China mirror. Any `uv` command (`uv sync`, `uv lock`, and also `uv run`, which re-locks on the fly) will silently rewrite `backend/uv.lock` URLs to the mirror unless prefixed with `UV_DEFAULT_INDEX=https://pypi.org/simple/`. CI rejects mirror-polluted lockfiles, so always run uv with that prefix here.
 
 ## Agent-Specific Instructions
 

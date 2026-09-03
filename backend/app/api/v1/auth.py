@@ -8,16 +8,17 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import tokens
+from app.core.net import resolve_client_ip
 from app.db.session import get_db
 from app.deps import AuthContext, get_current, get_redis
 from app.exceptions import AuthError, BizCode
 from app.schemas import (
+    ChangePasswordRequest,
     LoginRequest,
     LogoutRequest,
     OAuthCallbackRequest,
     RefreshRequest,
     RegisterRequest,
-    ChangePasswordRequest,
     SmsSendRequest,
     TokenPairResponse,
 )
@@ -30,7 +31,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 def _meta(request: Request, device_id: str | None = None) -> ClientMeta:
     return ClientMeta(
-        ip=request.client.host if request.client else "-",
+        ip=resolve_client_ip(request),
         user_agent=request.headers.get("User-Agent"),
         device_id=device_id,
     )

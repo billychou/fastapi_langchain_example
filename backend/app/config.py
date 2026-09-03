@@ -7,15 +7,27 @@ from __future__ import annotations
 
 import base64
 import binascii
+import logging
 from functools import lru_cache
+from typing import Literal
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_SYSTEM_PROMPT = (
     "你是一个乐于助人的智能助理。你可以查询当前时间、做数学计算、查询示例天气。"
     "请用中文回答，回答尽量简洁清晰。"
 )
+
+# ---------------------------------------------------------------------------
+# .env.example 中的演示占位值; 生产环境(APP_ENV=production)禁止复用, 启动即失败。
+# ---------------------------------------------------------------------------
+DEMO_JWT_SECRET = "REPLACE_WITH_openssl_rand_base64_48"
+DEMO_PII_KEYS = (
+    "k1:WnM9vicjEZwds16p/bvI3Ywaci4PKMEBl/tZVUl9Flc=,"
+    "k2:n5QGr8jgOA1i+kZOGk03LgpL8eeEJ2tB5SZrJNb1tAw="
+)
+DEMO_PII_BLIND_INDEX_KEY = "+Uj2zvu1ySBJ30/L5+YoPZxUWLztWyqhDKgu2aYh21s="
 
 
 class Settings(BaseSettings):
@@ -25,18 +37,34 @@ class Settings(BaseSettings):
     app_name: str = "backend"
     app_env: str = "production"  # dev / staging / production
     debug: bool = False
+    # 日志格式: auto=dev 用 text / production 用 JSON(便于采集), 可强制 text|json
+    log_format: Literal["auto", "text", "json"] = "auto"
     api_prefix: str = "/api/v1"
     cors_origins: str = "http://localhost:5173"
 
     # ================= LLM (聊天 Agent) =================
     llm_provider: str = "openai"  # openai | anthropic | mock
     llm_model: str = "gpt-4o-mini"
+    llm_timeout_seconds: float = 60.0  # 单次 LLM 请求超时(含流式), 防止上游挂死拖垮 SSE 连接
     openai_api_key: str = ""
     openai_base_url: str = ""
     anthropic_api_key: str = ""
     system_prompt: str = DEFAULT_SYSTEM_PROMPT
     chat_require_auth: bool = True  # /api/chat 是否要求登录(企业默认开启)
-    checkpoint_db_path: str = "./agent_checkpoints.sqlite"  # LangGraph SQLite checkpointer 本地文件
+    checkpoint_backend: Literal["sqlite", "postgres"] = (
+        "sqlite"  # 会话记忆存储: sqlite(零依赖开发) / postgres(生产多副本)
+    )
+    checkpoint_db_path: str = "./agent_checkpoints.sqlite"  # sqlite 后端时的本地文件路径
+    checkpoint_database_url: str = (
+        ""  # postgres 后端必填, 如 postgres://user:pass@host:5432/langgraph
+    )
+
+    # ================= 聊天接口保护 =================
+    chat_max_messages: int = 100  # 单次请求消息条数上限
+    chat_max_message_chars: int = 32_000  # 单条消息字符数上限
+    rl_chat_capacity: int = 10  # 聊天令牌桶容量(登录按账号/匿名按IP)
+    rl_chat_refill_per_min: float = 6.0  # 聊天令牌桶每分钟恢复速率
+    trusted_proxy_hops: int = 0  # 可信代理跳数: >0 时按 X-Forwarded-For 从右向左取客户端 IP
 
     # ================= MySQL =================
     database_url: str = (
@@ -92,6 +120,40 @@ class Settings(BaseSettings):
     pii_active_key_id: str = "k1"
     pii_keys: str = ""  # 格式 "k1:<base64-32B>,k2:<base64-32B>" 支持轮转保留旧版本
     pii_blind_index_key: str = ""  # HMAC 盲索引独立密钥(base64-32B)
+
+    # ------------------------------------------------------------------
+    @model_validator(mode="after")
+    def _assert_production_secrets(self) -> Settings:
+        """密钥安全闸门:
+
+        - 生产环境(APP_ENV=production): JWT/PII 密钥缺失、过短或仍是 .env.example
+          占位值时直接拒绝启动(fail-fast), 防止空密钥签发 Token、演示密钥加密 PII。
+        - 非生产环境: 仅告警, 便于本地无密钥演示。
+        """
+        problems: list[str] = []
+        if not self.jwt_secret_key:
+            problems.append("JWT_SECRET_KEY 未配置(生成: openssl rand -base64 48)")
+        elif len(self.jwt_secret_key) < 32:
+            problems.append("JWT_SECRET_KEY 长度不足 32 字符")
+        elif self.jwt_secret_key == DEMO_JWT_SECRET:
+            problems.append("JWT_SECRET_KEY 仍是 .env.example 占位值")
+        if not self.pii_keys:
+            problems.append("PII_KEYS 未配置(注册流程需加密手机号/邮箱)")
+        elif self.pii_keys.replace(" ", "") == DEMO_PII_KEYS:
+            problems.append("PII_KEYS 仍是 .env.example 演示密钥")
+        if not self.pii_blind_index_key:
+            problems.append("PII_BLIND_INDEX_KEY 未配置")
+        elif self.pii_blind_index_key == DEMO_PII_BLIND_INDEX_KEY:
+            problems.append("PII_BLIND_INDEX_KEY 仍是 .env.example 演示密钥")
+
+        if self.app_env == "production":
+            if problems:
+                raise ValueError("生产环境启动校验失败: " + "; ".join(problems))
+        elif problems:
+            logging.getLogger("config").warning(
+                "非生产环境检测到弱/占位密钥(%s); 生产部署前必须替换。", "; ".join(problems)
+            )
+        return self
 
     # ------------------------------------------------------------------
     @field_validator("pii_keys")

@@ -8,16 +8,26 @@ import {
   ScheduleOutlined,
   SmileOutlined,
 } from '@ant-design/icons';
-import type { ActionsFeedbackProps } from '@ant-design/x';
-import { Prompts } from '@ant-design/x';
+import type { ActionsFeedbackProps, Prompts } from '@ant-design/x';
 import type { XModelMessage } from '@ant-design/x-sdk';
 import type { GetProp } from 'antd';
 import locale from './local';
 
 // ==================== Type ====================
+// 后端 SSE 中 `agent` 字段携带的工具链事件(见 backend/app/api/chat.py)
+export interface AgentEvent {
+  type: 'tool_call' | 'tool_result';
+  id: string;
+  name: string;
+  args?: Record<string, unknown>;
+  result?: string;
+}
+
 export interface ChatMessage extends XModelMessage {
   extraInfo?: {
-    feedback: ActionsFeedbackProps['value'];
+    feedback?: ActionsFeedbackProps['value'];
+    // 本轮对话累积的工具调用/结果事件, 用于渲染 assistant 思维链
+    agentEvents?: AgentEvent[];
   };
 }
 

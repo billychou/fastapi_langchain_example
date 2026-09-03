@@ -20,12 +20,48 @@ dependencies = [
     "cryptography>=43.0",
     "email-validator>=2.1",
     "langgraph-checkpoint-sqlite>=3.1.1",
+    "langgraph-checkpoint-postgres>=3.1.2",
+    "psycopg[binary]>=3.1",
+    "alembic>=1.19.1",
 ]
 
 [dependency-groups]
 dev = [
     "httpx>=0.27",
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.8",
+    "fakeredis[lua]>=2.26",
 ]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["app", "tests"]
+
+[[tool.uv.index]]
+url = "https://pypi.org/simple/"
+default = true
+
+[tool.ruff.lint]
+# 首批启用规则集: 语法/风格/导入排序/常见 bug; 后续可逐步加严(如 S/D)
+select = ["E", "W", "F", "I", "B", "UP"]
+ignore = [
+    "E501",  # 长行: 存量代码较多, 先不强制
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["B011"]  # 测试中允许 assert False 类写法
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI 惯用法: Depends() 作为参数默认值并非真正的可变默认值, 加入白名单
+# (保留 B008 对其余真实可变默认值的检查)
+extend-immutable-calls = ["fastapi.Depends", "app.deps.require_permissions"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+pythonpath = ["."]  # package=false 项目不安装, 测试直接以仓库根为导入路径
 
 [tool.uv]
 package = false

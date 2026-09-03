@@ -1,11 +1,11 @@
-"use client";
+'use client';
 
 /**
  * 用户管理(管理端): 账号分页列表 + 角色全量分配。
  * 服务端以 RBAC 权限点强制校验(account:read / rbac:read / rbac:assign),
  * 前端仅做体验层守卫。
  */
-import { ArrowLeftOutlined, TeamOutlined } from "@ant-design/icons";
+import { ArrowLeftOutlined, TeamOutlined } from '@ant-design/icons';
 import {
   Button,
   Card,
@@ -20,20 +20,20 @@ import {
   Tag,
   Tooltip,
   Typography,
-} from "antd";
-import type { ColumnsType } from "antd/es/table";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
-import { type AdminAccountItem, authApi, type RoleItem } from "@/lib/api";
-import { useAuth } from "@/lib/auth-context";
+} from 'antd';
+import type { ColumnsType } from 'antd/es/table';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { useCallback, useEffect, useState } from 'react';
+import { type AdminAccountItem, authApi, type RoleItem } from '@/lib/api';
+import { useAuth } from '@/lib/auth-context';
 
 const { Title, Text } = Typography;
 
 const STATUS_TAG: Record<number, { color: string; label: string }> = {
-  1: { color: "green", label: "正常" },
-  2: { color: "orange", label: "锁定" },
-  3: { color: "default", label: "已注销" },
+  1: { color: 'green', label: '正常' },
+  2: { color: 'orange', label: '锁定' },
+  3: { color: 'default', label: '已注销' },
 };
 
 const UsersPage: React.FC = () => {
@@ -59,7 +59,7 @@ const UsersPage: React.FC = () => {
       setItems(data.items);
       setTotal(data.total);
     } catch (err) {
-      message.error(err instanceof Error ? err.message : "加载账号列表失败");
+      message.error(err instanceof Error ? err.message : '加载账号列表失败');
     } finally {
       setLoading(false);
     }
@@ -72,13 +72,13 @@ const UsersPage: React.FC = () => {
   // ---------------- 守卫 ----------------
   if (initializing) {
     return (
-      <Flex align="center" justify="center" style={{ minHeight: "100vh" }}>
+      <Flex align="center" justify="center" style={{ minHeight: '100vh' }}>
         <Spin size="large" />
       </Flex>
     );
   }
   if (!user) {
-    router.replace("/login");
+    router.replace('/login');
     return null;
   }
   if (!isAdmin) {
@@ -108,7 +108,7 @@ const UsersPage: React.FC = () => {
       setRoles(roleList);
       setSelectedRoles(current.role_codes);
     } catch (err) {
-      message.error(err instanceof Error ? err.message : "加载角色失败");
+      message.error(err instanceof Error ? err.message : '加载角色失败');
       setEditing(null);
     }
   };
@@ -116,17 +116,17 @@ const UsersPage: React.FC = () => {
   const saveRoles = async () => {
     if (!editing) return;
     if (selectedRoles.length === 0) {
-      message.warning("请至少选择一个角色");
+      message.warning('请至少选择一个角色');
       return;
     }
     setSaving(true);
     try {
       await authApi.assignRoles(editing.account_uuid, selectedRoles);
-      message.success("角色已更新");
+      message.success('角色已更新');
       setEditing(null);
       void loadAccounts();
     } catch (err) {
-      message.error(err instanceof Error ? err.message : "保存失败");
+      message.error(err instanceof Error ? err.message : '保存失败');
     } finally {
       setSaving(false);
     }
@@ -134,12 +134,12 @@ const UsersPage: React.FC = () => {
 
   const columns: ColumnsType<AdminAccountItem> = [
     {
-      title: "账号",
-      dataIndex: "account_uuid",
+      title: '账号',
+      dataIndex: 'account_uuid',
       width: 140,
       render: (uuid: string, record) => (
         <Space direction="vertical" size={0}>
-          <Text strong>{record.nickname || "—"}</Text>
+          <Text strong>{record.nickname || '—'}</Text>
           <Tooltip title={uuid}>
             <Text type="secondary" style={{ fontSize: 12 }}>
               {uuid.slice(0, 8)}…
@@ -149,49 +149,49 @@ const UsersPage: React.FC = () => {
       ),
     },
     {
-      title: "手机号",
-      dataIndex: "phone_masked",
+      title: '手机号',
+      dataIndex: 'phone_masked',
       width: 130,
       render: (v: string | null) => v || <Text type="secondary">未绑定</Text>,
     },
     {
-      title: "邮箱",
-      dataIndex: "email_masked",
+      title: '邮箱',
+      dataIndex: 'email_masked',
       width: 180,
       render: (v: string | null) => v || <Text type="secondary">未绑定</Text>,
     },
     {
-      title: "状态",
-      dataIndex: "status",
+      title: '状态',
+      dataIndex: 'status',
       width: 90,
       render: (status: number) => {
         const tag = STATUS_TAG[status] || {
-          color: "default",
+          color: 'default',
           label: String(status),
         };
         return <Tag color={tag.color}>{tag.label}</Tag>;
       },
     },
     {
-      title: "登录策略",
-      dataIndex: "login_policy",
+      title: '登录策略',
+      dataIndex: 'login_policy',
       width: 110,
       render: (policy: string) => (
-        <Tag color={policy === "single_device" ? "volcano" : "blue"}>
-          {policy === "single_device" ? "单端互踢" : "多端在线"}
+        <Tag color={policy === 'single_device' ? 'volcano' : 'blue'}>
+          {policy === 'single_device' ? '单端互踢' : '多端在线'}
         </Tag>
       ),
     },
     {
-      title: "最近登录",
-      dataIndex: "last_login_at",
+      title: '最近登录',
+      dataIndex: 'last_login_at',
       width: 180,
       render: (v: string | null) =>
-        v ? v.replace("T", " ").slice(0, 19) : "—",
+        v ? v.replace('T', ' ').slice(0, 19) : '—',
     },
     {
-      title: "操作",
-      key: "actions",
+      title: '操作',
+      key: 'actions',
       width: 110,
       render: (_, record) => (
         <Button
@@ -206,8 +206,8 @@ const UsersPage: React.FC = () => {
   ];
 
   return (
-    <div style={{ minHeight: "100vh", background: "#f5f5f5", padding: 24 }}>
-      <Card style={{ maxWidth: 1200, margin: "0 auto" }}>
+    <div style={{ minHeight: '100vh', background: '#f5f5f5', padding: 24 }}>
+      <Card style={{ maxWidth: 1200, margin: '0 auto' }}>
         <Flex
           justify="space-between"
           align="center"
@@ -244,7 +244,7 @@ const UsersPage: React.FC = () => {
       </Card>
 
       <Modal
-        title={`分配角色 — ${editing?.nickname || editing?.account_uuid?.slice(0, 8) || ""}`}
+        title={`分配角色 — ${editing?.nickname || editing?.account_uuid?.slice(0, 8) || ''}`}
         open={!!editing}
         onCancel={() => setEditing(null)}
         onOk={() => void saveRoles()}
@@ -253,11 +253,11 @@ const UsersPage: React.FC = () => {
         cancelText="取消"
       >
         <Checkbox.Group
-          style={{ display: "flex", flexDirection: "column", gap: 8 }}
+          style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
           value={selectedRoles}
           onChange={(values) => setSelectedRoles(values as string[])}
           options={roles.map((r) => ({
-            label: `${r.role_name} (${r.role_code})${r.description ? ` — ${r.description}` : ""}`,
+            label: `${r.role_name} (${r.role_code})${r.description ? ` — ${r.description}` : ''}`,
             value: r.role_code,
           }))}
         />

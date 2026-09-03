@@ -1,54 +1,44 @@
 """FastAPI entrypoint: SSE streaming chat + 用户认证/RBAC 一体化服务。
 
-- /api/health       健康检查(匿名)
-- /api/chat         SSE 聊天(默认要求登录, CHAT_REQUIRE_AUTH 控制)
+- /api/health       健康检查(匿名, 仅自述配置)
+- /live             存活探针(不触碰依赖)
+- /ready            就绪探针(MySQL/Redis 探测, 503 附失败依赖清单)
+- /api/chat         SSE 聊天(默认要求登录, CHAT_REQUIRE_AUTH 控制), 实现见 app/api/chat.py
 - /api/v1/auth/*    注册/登录/刷新/登出/改密/OAuth
 - /api/v1/account/* 当前用户资料与在线会话
 - /api/v1/admin/*   管理端(RBAC 权限点控制)
 """
 
-import json
+import asyncio
 import logging
-from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
-from langchain_core.messages import (
-    AIMessage,
-    AIMessageChunk,
-    BaseMessage,
-    HumanMessage,
-    SystemMessage,
-)
+from fastapi.responses import JSONResponse
+from sqlalchemy import text
 
-from app.agent import close_checkpointer, get_agent, init_checkpointer
+from app.agent import close_checkpointer, init_checkpointer
+from app.api.chat import router as chat_router
 from app.api.v1.router import api_router
 from app.config import get_settings
-from app.db.redis import close_redis, init_redis
-from app.db.session import dispose_engine, get_db, get_engine
-from app.deps import AuthContext, get_current_optional
+from app.core.log import setup_logging
+from app.db.redis import close_redis, get_redis_client, init_redis
+from app.db.session import dispose_engine, get_engine
 from app.exceptions import BizCode, BizError
 from app.middleware.auth import build_middlewares
-from app.schemas import ChatRequest, MessageType
-from app.services import thread_service
-from sqlalchemy.ext.asyncio import AsyncSession
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s :: %(message)s",
-)
 logger = logging.getLogger("api")
+
+_READY_PROBE_TIMEOUT = 2.0  # 就绪探针单依赖超时上限(秒)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """预热资源: 数据库引擎惰性创建; Redis 探活失败仅告警(聊天功能可降级运行)。"""
     get_engine()
-    await init_checkpointer()  # 打开 SQLite checkpointer 连接并建表
+    await init_checkpointer()  # 打开 checkpointer 连接并建表
     try:
         redis = init_redis()
         await redis.ping()
@@ -63,6 +53,7 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     settings = get_settings()
+    setup_logging(fmt=settings.log_format, app_env=settings.app_env)
     app = FastAPI(
         title="LangChain Agent Chat API",
         version="0.2.0",
@@ -103,7 +94,8 @@ def create_app() -> FastAPI:
     async def unhandled_handler(request: Request, exc: Exception) -> JSONResponse:
         logger.exception("unhandled exception: %s %s", request.method, request.url.path)
         return JSONResponse(
-            {"code": int(BizCode.INTERNAL), "message": "服务内部错误", "data": None}, status_code=500
+            {"code": int(BizCode.INTERNAL), "message": "服务内部错误", "data": None},
+            status_code=500,
         )
 
     # ---------------- 基础设施 ----------------
@@ -115,119 +107,47 @@ def create_app() -> FastAPI:
             "model": settings.llm_model,
         }
 
-    # ---------------- 聊天(SSE) ----------------
-    @app.post("/api/chat")
-    async def chat(
-        request: ChatRequest,
-        ctx: AuthContext | None = Depends(get_current_optional),
-        db: AsyncSession = Depends(get_db),
-    ) -> StreamingResponse:
-        if ctx is not None:
-            if len(request.conversation_id) > thread_service.THREAD_ID_MAX:
-                raise BizError(BizCode.BAD_REQUEST, "conversation_id 过长(最长 64 字符)")
-            # 会话元数据行不存在则自动创建(首次聊天即建档); 他人会话 → 404
-            await thread_service.ensure_thread(db, ctx.account_id, request.conversation_id)
-        return StreamingResponse(
-            chat_events(request, ctx, db),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-            },
-        )
+    @app.get("/live")
+    async def live() -> dict[str, str]:
+        """存活探针: 进程能响应即返回 200, 不触碰任何依赖。"""
+        return {"status": "ok"}
 
+    @app.get("/ready")
+    async def ready() -> JSONResponse:
+        """就绪探针: 依赖(MySQL/Redis)可用才返回 200, 供编排系统摘流量。
+
+        Redis 不可用时服务虽能降级运行, 但认证与限流失效, 因此这里如实上报,
+        由编排方决定是否摘除流量。探测均有超时上限, 不会拖慢探针本身。
+        """
+        problems: list[str] = []
+        try:
+            async with asyncio.timeout(_READY_PROBE_TIMEOUT):
+                async with get_engine().connect() as conn:
+                    await conn.execute(text("SELECT 1"))
+        except Exception as exc:  # noqa: BLE001 - 探针只上报类别, 不泄露细节
+            problems.append(f"mysql: {type(exc).__name__}")
+        redis = get_redis_client()
+        if redis is not None:
+            try:
+                async with asyncio.timeout(_READY_PROBE_TIMEOUT):
+                    await redis.ping()
+            except Exception as exc:  # noqa: BLE001
+                problems.append(f"redis: {type(exc).__name__}")
+        if problems:
+            return JSONResponse(
+                {
+                    "code": int(BizCode.INTERNAL),
+                    "message": "readiness check failed",
+                    "data": problems,
+                },
+                status_code=503,
+            )
+        return JSONResponse({"code": int(BizCode.OK), "message": "ok", "data": None})
+
+    # ---------------- 路由 ----------------
+    app.include_router(chat_router, prefix="/api")  # /api/chat: SSE 聊天
     app.include_router(api_router, prefix=settings.api_prefix)
     return app
-
-
-def sse(payload: dict[str, Any]) -> str:
-    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
-
-
-def _chunk_text(content: Any) -> str:
-    """Normalize message content (str or list of content blocks) to text."""
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts = []
-        for block in content:
-            if isinstance(block, str):
-                parts.append(block)
-            elif isinstance(block, dict) and block.get("type") == "text":
-                parts.append(block.get("text", ""))
-        return "".join(parts)
-    return ""
-
-
-def _to_langchain_messages(messages: list[MessageType]) -> list[BaseMessage]:
-    """Map OpenAI-style request messages to LangChain messages by `role`.
-
-    Falls back to HumanMessage for unknown roles so the agent always receives
-    a non-empty history.
-    """
-    result: list[BaseMessage] = []
-    for m in messages:
-        content = m.content
-        if m.role == "user":
-            result.append(HumanMessage(content=content))
-        elif m.role == "assistant":
-            result.append(AIMessage(content=content))
-        elif m.role == "system":
-            result.append(SystemMessage(content=content))
-        else:
-            result.append(HumanMessage(content=content))
-    return result
-
-
-async def chat_events(
-    request: ChatRequest, ctx: AuthContext | None, db: AsyncSession
-) -> AsyncIterator[str]:
-    """Stream the agent's reply as OpenAI-style SSE chunks.
-
-    Each `data:` line is a JSON object of shape
-    `{"choices": [{"delta": {"content": "..."}}]}`, matching what
-    `@ant-design/x-sdk`'s `DeepSeekChatProvider` parses. Tool calls and
-    tool results from the agent are not surfaced — the agent will emit a
-    final text message after any tool loop, which is what the UI renders.
-
-    The stream is terminated with `data: [DONE]`. If the agent raises,
-    the error message is appended as a final content delta so it surfaces
-    in the chat bubble instead of being silently dropped.
-
-    登录态下, 一轮成功结束后更新 agent_threads 元数据(标题/预览/时间);
-    元数据写入失败不影响 SSE 输出。
-    """
-    agent = await get_agent()
-    thread_id = request.conversation_id
-    config = {"configurable": {"thread_id": thread_id}}
-
-    first_user_text = next(
-        (m.content for m in reversed(request.messages) if m.role == "user"), ""
-    )
-    assistant_parts: list[str] = []
-
-    try:
-        async for chunk, _metadata in agent.astream(
-            {"messages": _to_langchain_messages(request.messages)},
-            config=config,
-            stream_mode="messages",
-        ):
-            if isinstance(chunk, AIMessageChunk):
-                text = _chunk_text(chunk.content)
-                if text:
-                    assistant_parts.append(text)
-                    yield sse({"choices": [{"delta": {"content": text}}]})
-    except Exception as exc:  # noqa: BLE001 - surface any agent error to the client
-        logger.exception("Agent stream failed")
-        yield sse({"choices": [{"delta": {"content": f"\n\n[Agent 调用失败: {exc}]"}}]})
-    else:
-        if ctx is not None:
-            await thread_service.record_exchange(
-                db, ctx.account_id, thread_id, first_user_text, "".join(assistant_parts)
-            )
-
-    yield "data: [DONE]\n\n"
 
 
 app = create_app()

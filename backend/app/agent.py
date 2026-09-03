@@ -1,4 +1,12 @@
-"""Agent construction: chat model + LangChain agent + SQLite conversation memory."""
+"""Agent construction: chat model + LangChain agent + conversation memory.
+
+会话记忆(LangGraph checkpointer)支持两种后端, 由 CHECKPOINT_BACKEND 切换:
+
+- ``sqlite``(默认): 零外部依赖, 本地开发开箱即用;
+- ``postgres``: 连接 ``CHECKPOINT_DATABASE_URL``, 首次启动自动建
+  ``checkpoint_*`` 表(LangGraph 官方 checkpointer, 与 LangGraph Platform
+  同源)。SQLite 文件无法跨容器共享, 生产/多副本部署应使用 Postgres。
+"""
 
 import asyncio
 import json
@@ -12,48 +20,73 @@ from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from psycopg import AsyncConnection
+from psycopg.rows import dict_row
 
 from app.config import Settings, get_settings
 from app.tools import ALL_TOOLS
 
 logger = logging.getLogger("agent")
 
+Checkpointer = AsyncSqliteSaver | AsyncPostgresSaver
+
 
 # ---------------------------------------------------------------------------
-# SQLite checkpointer lifecycle
+# Checkpointer lifecycle
 #
-# AsyncSqliteSaver keeps a single long-lived aiosqlite connection. The
-# checkpointer is initialized lazily (or eagerly from FastAPI lifespan) and
+# Both backends keep a single long-lived connection owned by the module and
 # closed on shutdown so the event loop can exit cleanly.
 # ---------------------------------------------------------------------------
-_checkpointer: AsyncSqliteSaver | None = None
+_checkpointer: Checkpointer | None = None
+_checkpointer_conn: AsyncConnection | aiosqlite.Connection | None = None
 _checkpointer_lock = asyncio.Lock()
 
 
-async def init_checkpointer() -> AsyncSqliteSaver:
-    """Open (or reuse) the SQLite-backed checkpointer; creates file and tables."""
-    global _checkpointer
+async def init_checkpointer() -> Checkpointer:
+    """Open (or reuse) the configured checkpointer; creates tables on first use."""
+    global _checkpointer, _checkpointer_conn
     if _checkpointer is None:
         async with _checkpointer_lock:
             if _checkpointer is None:
                 settings = get_settings()
-                db_path = Path(settings.checkpoint_db_path)
-                db_path.parent.mkdir(parents=True, exist_ok=True)
-                conn = await aiosqlite.connect(db_path)
-                saver = AsyncSqliteSaver(conn)
-                await saver.setup()
-                _checkpointer = saver
-                logger.info("Agent checkpointer initialized (sqlite path=%s)", db_path)
+                if settings.checkpoint_backend == "postgres":
+                    if not settings.checkpoint_database_url:
+                        raise RuntimeError(
+                            "CHECKPOINT_BACKEND=postgres 但未配置 CHECKPOINT_DATABASE_URL, "
+                            "例如 postgres://langgraph:CHANGE_ME@127.0.0.1:5432/langgraph"
+                        )
+                    conn = await AsyncConnection.connect(
+                        settings.checkpoint_database_url,
+                        autocommit=True,
+                        prepare_threshold=0,
+                        row_factory=dict_row,
+                    )
+                    saver: Checkpointer = AsyncPostgresSaver(conn)
+                    await saver.setup()
+                    _checkpointer_conn = conn
+                    _checkpointer = saver
+                    logger.info("Agent checkpointer initialized (postgres)")
+                else:
+                    db_path = Path(settings.checkpoint_db_path)
+                    db_path.parent.mkdir(parents=True, exist_ok=True)
+                    conn = await aiosqlite.connect(db_path)
+                    saver = AsyncSqliteSaver(conn)
+                    await saver.setup()
+                    _checkpointer_conn = conn
+                    _checkpointer = saver
+                    logger.info("Agent checkpointer initialized (sqlite path=%s)", db_path)
     return _checkpointer
 
 
 async def close_checkpointer() -> None:
-    """Close the SQLite connection if it was opened."""
-    global _checkpointer
-    saver, _checkpointer = _checkpointer, None
-    if saver is not None:
-        await saver.conn.close()
+    """Close the underlying checkpointer connection if it was opened."""
+    global _checkpointer, _checkpointer_conn
+    saver, conn = _checkpointer, _checkpointer_conn
+    _checkpointer, _checkpointer_conn = None, None
+    if saver is not None and conn is not None:
+        await conn.close()
         logger.info("Agent checkpointer closed")
 
 
@@ -194,14 +227,22 @@ def build_chat_model(settings: Settings) -> BaseChatModel:
             raise RuntimeError("LLM_PROVIDER=anthropic 但未配置 ANTHROPIC_API_KEY")
         from langchain_anthropic import ChatAnthropic
 
-        return ChatAnthropic(model=settings.llm_model, api_key=settings.anthropic_api_key)
+        return ChatAnthropic(
+            model=settings.llm_model,
+            api_key=settings.anthropic_api_key,
+            timeout=settings.llm_timeout_seconds,
+        )
 
     if provider == "openai":
         if not settings.openai_api_key:
             raise RuntimeError("LLM_PROVIDER=openai 但未配置 OPENAI_API_KEY")
         from langchain_openai import ChatOpenAI
 
-        kwargs = {"model": settings.llm_model, "api_key": settings.openai_api_key}
+        kwargs = {
+            "model": settings.llm_model,
+            "api_key": settings.openai_api_key,
+            "timeout": settings.llm_timeout_seconds,  # 上游挂死时快速失败, 由聊天路由兜底提示
+        }
         if settings.openai_base_url:
             kwargs["base_url"] = settings.openai_base_url
         return ChatOpenAI(**kwargs)
@@ -233,7 +274,7 @@ _agent_lock = asyncio.Lock()
 
 
 async def get_agent() -> Any:
-    """Create the agent once: model + tools + SQLite-backed conversation store."""
+    """Create the agent once: model + tools + configured conversation store."""
     global _agent
     if _agent is None:
         async with _agent_lock:

@@ -1,6 +1,6 @@
-"use client";
+'use client';
 
-import { LockOutlined, SmileOutlined, UserOutlined } from "@ant-design/icons";
+import { LockOutlined, SmileOutlined, UserOutlined } from '@ant-design/icons';
 import {
   Button,
   Card,
@@ -9,11 +9,11 @@ import {
   message,
   Segmented,
   Typography,
-} from "antd";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
-import { useAuth } from "@/lib/auth-context";
+} from 'antd';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
+import { useAuth } from '@/lib/auth-context';
 
 const { Title, Text } = Typography;
 
@@ -28,20 +28,20 @@ const RegisterPage: React.FC = () => {
   const router = useRouter();
   const { user, initializing, register } = useAuth();
   const [submitting, setSubmitting] = useState(false);
-  const [identityType, setIdentityType] = useState<"phone" | "email">("phone");
+  const [identityType, setIdentityType] = useState<'phone' | 'email'>('phone');
 
   useEffect(() => {
-    if (!initializing && user) router.replace("/");
+    if (!initializing && user) router.replace('/');
   }, [initializing, user, router]);
 
   const onFinish = async (values: RegisterForm) => {
     setSubmitting(true);
     try {
       await register({ ...values, identity_type: identityType });
-      message.success("注册成功, 已自动登录");
-      router.replace("/");
+      message.success('注册成功, 已自动登录');
+      router.replace('/');
     } catch (err) {
-      message.error(err instanceof Error ? err.message : "注册失败");
+      message.error(err instanceof Error ? err.message : '注册失败');
     } finally {
       setSubmitting(false);
     }
@@ -50,15 +50,15 @@ const RegisterPage: React.FC = () => {
   return (
     <div
       style={{
-        minHeight: "100vh",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        background: "linear-gradient(135deg, #f0f5ff 0%, #e6fffb 100%)",
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'linear-gradient(135deg, #f0f5ff 0%, #e6fffb 100%)',
       }}
     >
-      <Card style={{ width: 420, boxShadow: "0 8px 24px rgba(0,0,0,0.08)" }}>
-        <Title level={3} style={{ textAlign: "center", marginBottom: 24 }}>
+      <Card style={{ width: 420, boxShadow: '0 8px 24px rgba(0,0,0,0.08)' }}>
+        <Title level={3} style={{ textAlign: 'center', marginBottom: 24 }}>
           创建账号
         </Title>
 
@@ -67,29 +67,29 @@ const RegisterPage: React.FC = () => {
             <Segmented
               block
               value={identityType}
-              onChange={(v) => setIdentityType(v as "phone" | "email")}
+              onChange={(v) => setIdentityType(v as 'phone' | 'email')}
               options={[
-                { label: "手机号", value: "phone" },
-                { label: "邮箱", value: "email" },
+                { label: '手机号', value: 'phone' },
+                { label: '邮箱', value: 'email' },
               ]}
             />
           </Form.Item>
 
           <Form.Item
             name="identifier"
-            label={identityType === "phone" ? "手机号" : "邮箱"}
+            label={identityType === 'phone' ? '手机号' : '邮箱'}
             rules={[
-              { required: true, message: "请输入账号" },
-              identityType === "phone"
-                ? { pattern: /^1[3-9]\d{9}$/, message: "手机号格式不正确" }
-                : { type: "email", message: "邮箱格式不正确" },
+              { required: true, message: '请输入账号' },
+              identityType === 'phone'
+                ? { pattern: /^1[3-9]\d{9}$/, message: '手机号格式不正确' }
+                : { type: 'email', message: '邮箱格式不正确' },
             ]}
           >
             <Input
               size="large"
               prefix={<UserOutlined />}
               placeholder={
-                identityType === "phone" ? "请输入手机号" : "请输入邮箱"
+                identityType === 'phone' ? '请输入手机号' : '请输入邮箱'
               }
               autoComplete="username"
             />
@@ -107,8 +107,8 @@ const RegisterPage: React.FC = () => {
             name="password"
             label="密码"
             rules={[
-              { required: true, message: "请输入密码" },
-              { min: 8, message: "密码至少 8 位" },
+              { required: true, message: '请输入密码' },
+              { min: 8, message: '密码至少 8 位' },
               {
                 validator: (_, value) => {
                   if (!value) return Promise.resolve();
@@ -122,7 +122,7 @@ const RegisterPage: React.FC = () => {
                     ? Promise.resolve()
                     : Promise.reject(
                         new Error(
-                          "需包含大小写字母、数字、特殊字符中的至少三类",
+                          '需包含大小写字母、数字、特殊字符中的至少三类',
                         ),
                       );
                 },
@@ -140,14 +140,14 @@ const RegisterPage: React.FC = () => {
           <Form.Item
             name="confirmPassword"
             label="确认密码"
-            dependencies={["password"]}
+            dependencies={['password']}
             rules={[
-              { required: true, message: "请再次输入密码" },
+              { required: true, message: '请再次输入密码' },
               ({ getFieldValue }) => ({
                 validator(_, value) {
-                  return !value || getFieldValue("password") === value
+                  return !value || getFieldValue('password') === value
                     ? Promise.resolve()
-                    : Promise.reject(new Error("两次输入的密码不一致"));
+                    : Promise.reject(new Error('两次输入的密码不一致'));
                 },
               }),
             ]}
@@ -171,7 +171,7 @@ const RegisterPage: React.FC = () => {
             </Button>
           </Form.Item>
 
-          <div style={{ textAlign: "center" }}>
+          <div style={{ textAlign: 'center' }}>
             <Text type="secondary">已有账号？</Text>
             <Link href="/login" style={{ marginLeft: 4 }}>
               去登录

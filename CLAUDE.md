@@ -23,7 +23,7 @@ uv run uvicorn app.main:app --reload --port 5001   # start dev server
 # or: uv run python -m app.main  (runs main.py which calls uvicorn on 0.0.0.0:5001)
 ```
 
-There are no tests configured. `httpx` is in the dev group for ad-hoc requests.
+Tests: `uv run pytest -q` (pytest + httpx TestClient; external deps are frozen to dead ports/mocks in `tests/conftest.py`, so no MySQL/Redis/LLM needed). Lint: `uv run ruff check .`. CI (`.github/workflows/ci.yml`) runs ruff + pytest for the backend and lint + build for the frontend; it rejects mirror URLs in `uv.lock` — if you touch dependencies, regenerate the lock with `UV_DEFAULT_INDEX=https://pypi.org/simple/ uv lock`.
 
 ### User & auth service (merged into backend)
 
@@ -35,13 +35,14 @@ There are no tests configured. `httpx` is in the dev group for ad-hoc requests.
 
 ### Backend architecture
 
-`backend/app/main.py` is the FastAPI entrypoint. Two endpoints:
+`backend/app/main.py` is the FastAPI entrypoint. Key endpoints:
 - `GET /api/health` — returns provider + model.
+- `GET /live` / `GET /ready` — liveness / readiness probes (ready returns 503 with the failing-dependency list; also used by the Docker HEALTHCHECK).
 - `POST /api/chat` — `StreamingResponse` with `media_type="text/event-stream"`.
 
-The SSE stream emits OpenAI-style chunks so the frontend's `DeepSeekChatProvider` (`@ant-design/x-sdk`) can parse them directly: each `data:` line is `{"choices": [{"delta": {"content": "..."}}]}`, terminated by `data: [DONE]`. Tool calls / tool results from the agent are NOT surfaced in the stream — the agent emits a final text message after any tool loop, which is what the UI renders. If the agent raises mid-stream, the error message is appended as a final content delta so it shows up in the chat bubble.
+The SSE stream emits OpenAI-style chunks so the frontend's `DeepSeekChatProvider` (`@ant-design/x-sdk`) can parse them directly: each `data:` line is `{"choices": [{"delta": {"content": "..."}}]}`, terminated by `data: [DONE]`. On top of `choices[].delta`, events may carry a top-level `agent` field with tool-chain events — `{"type": "tool_call"|"tool_result", "id", "name", "args"|"result"}` (result truncated at 2000 chars); the frontend renders them as a thought chain, and clients that only read deltas ignore the field. If the agent raises mid-stream, a sanitized notice (with request-id) is appended as a final content delta so it shows up in the chat bubble.
 
-`backend/app/agent.py` builds the agent once via `get_agent()` (lru-cached). Construction order: `build_chat_model` (or `MockChatModel` fallback) → `create_agent(model, tools=ALL_TOOLS, system_prompt, checkpointer=InMemorySaver())`. Conversation memory is keyed by `thread_id` from `ChatRequest.conversation_id` (passed through LangGraph's `configurable.thread_id`).
+`backend/app/agent.py` builds the agent once via `get_agent()` (lru-cached). Construction order: `build_chat_model` (or `MockChatModel` fallback) → `create_agent(model, tools=ALL_TOOLS, system_prompt, checkpointer)`. The checkpointer is SQLite by default (`CHECKPOINT_BACKEND=sqlite`) or PostgreSQL (`CHECKPOINT_BACKEND=postgres` + `CHECKPOINT_DATABASE_URL`, LangGraph's official `AsyncPostgresSaver`; tables auto-created on first boot) so conversation memory survives restarts and works across replicas. Memory is keyed by `thread_id` from `ChatRequest.conversation_id` (passed through LangGraph's `configurable.thread_id`).
 
 **Mock model fallback**: when `LLM_PROVIDER` is `openai`/`anthropic` but the corresponding API key is missing, `_resolve_model` logs a warning and swaps in `MockChatModel` — a deterministic fake that streams canned replies and emits demo tool calls for time/weather/math queries. This lets the UI run end-to-end with no credentials. Don't assume a real LLM is in use; check `GET /api/health` `provider` field.
 
@@ -69,11 +70,11 @@ pnpm format   # biome format --write
 Single-page chat UI in `frontend/src/app/page.tsx` (client component). Built on Ant Design X:
 - `useXChat` (`@ant-design/x-sdk`) manages messages, streaming, retry, abort.
 - `useXConversations` manages the sidebar conversation list.
-- `DeepSeekChatProvider` + `XRequest('http://127.0.0.1:5001/api/chat', { manual: true })` adapt the backend's SSE stream into the X message protocol. One provider per conversation key, cached in `providerCaches`.
+- `ToolChainChatProvider` (a `DeepSeekChatProvider` subclass that also accumulates the backend's `agent` tool-chain events into `extraInfo.agentEvents`) + `XRequest('http://127.0.0.1:5001/api/chat', { manual: true })` adapt the backend's SSE stream into the X message protocol. One provider per conversation key, cached in `providerCaches`. Assistant bubble headers render the accumulated tool steps as a `ThoughtChain` (tool_call → loading, matching tool_result → success with collapsible result).
 - Assistant bubbles render markdown via `@ant-design/x-markdown`'s `XMarkdown` with streaming animation tied to `status === 'updating'`.
 - `ThinkComponent` is mapped to the `think` markdown tag.
 
-The backend's SSE event types (`delta`/`tool`/`done`/`error`) are translated by `DeepSeekChatProvider` — the frontend code treats `messages`/`isRequesting`/`abort`/`onReload`/`setMessage` as the API surface, not the raw SSE events.
+The backend's SSE events (OpenAI-style deltas plus `agent` tool-chain events) are translated by the provider — the frontend code treats `messages`/`isRequesting`/`abort`/`onReload`/`setMessage` as the API surface, not the raw SSE events.
 
 `frontend/src/app/layout.tsx` wraps everything in `AntdRegistry` (Next.js App Router SSR for Ant Design). `frontend/src/x-markdown/demo/_utils.ts` contains demo helpers (mock fetch stream, markdown theme hook) used by `page.tsx`. `frontend/src/app/_utils/local.ts` holds the locale strings used throughout the UI.
 
@@ -81,7 +82,7 @@ Biome config (`frontend/biome.json`): 2-space indent, recommended lint rules + N
 
 ## Cross-cutting notes
 
-- The backend has no test suite; the frontend has no test runner configured. Verify changes by running both apps and exercising the chat flow (try "现在几点了" to test the tool-call loop in mock mode).
+- Backend changes: `uv run ruff check .` + `uv run pytest -q` must pass. Frontend: `pnpm lint` + `pnpm build` (no frontend test runner). Then exercise the chat flow manually (try "现在几点了" to test the tool-call loop in mock mode).
 - CORS: backend default allows `localhost:3000` and `localhost:5173`. If you change the frontend port, update `CORS_ORIGINS` in `backend/.env` and restart.
 - The frontend chat endpoint URL (`127.0.0.1:5001/api/chat`) is hardcoded in `page.tsx` — change it there, not in the backend.
 - `frontend/CLAUDE.md` is just `@AGENTS.md` — the Next.js 16 caveat lives there.

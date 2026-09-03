@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    name: Backend (ruff + pytest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.13"
+          enable-cache: true
+      - name: Verify lockfile uses public PyPI
+        run: |
+          if grep -qiE 'aliyun|tsinghua|douban' uv.lock; then
+            echo "::error::uv.lock contains mirror URLs. Regenerate with UV_DEFAULT_INDEX=https://pypi.org/simple/ uv lock"
+            exit 1
+          fi
+      - name: Install dependencies
+        run: uv sync --frozen
+      - name: Lint (ruff)
+        run: uv run ruff check .
+      - name: Test (pytest)
+        run: uv run pytest -q
+
+  frontend:
+    name: Frontend (biome)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.1  
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Lint (biome)
+        run: pnpm lint

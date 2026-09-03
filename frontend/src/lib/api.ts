@@ -3,10 +3,10 @@
  */
 
 export const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:5001";
+  process.env.NEXT_PUBLIC_API_BASE || 'http://127.0.0.1:5001';
 
-const ACCESS_KEY = "auth.accessToken";
-const REFRESH_KEY = "auth.refreshToken";
+const ACCESS_KEY = 'auth.accessToken';
+const REFRESH_KEY = 'auth.refreshToken';
 
 // ---------------- 类型 ----------------
 export interface ApiEnvelope<T> {
@@ -60,12 +60,12 @@ export class ApiError extends Error {
 
 // ---------------- Token 存储 ----------------
 export function getAccessToken(): string | null {
-  if (typeof window === "undefined") return null;
+  if (typeof window === 'undefined') return null;
   return window.localStorage.getItem(ACCESS_KEY);
 }
 
 export function getRefreshToken(): string | null {
-  if (typeof window === "undefined") return null;
+  if (typeof window === 'undefined') return null;
   return window.localStorage.getItem(REFRESH_KEY);
 }
 
@@ -83,9 +83,9 @@ export function clearTokens(): void {
 function jwtExpSeconds(token: string): number | null {
   try {
     const payload = JSON.parse(
-      atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")),
+      atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')),
     );
-    return typeof payload.exp === "number" ? payload.exp : null;
+    return typeof payload.exp === 'number' ? payload.exp : null;
   } catch {
     return null;
   }
@@ -102,8 +102,8 @@ export function refreshTokens(): Promise<string | null> {
         const refresh_token = getRefreshToken();
         if (!refresh_token) return null;
         const resp = await fetch(`${API_BASE}/api/v1/auth/refresh`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ refresh_token }),
         });
         const body: ApiEnvelope<TokenPair> = await resp.json();
@@ -147,9 +147,9 @@ async function request<T>(
 ): Promise<T> {
   const token = await getValidAccessToken();
   const headers = new Headers(init.headers);
-  if (token) headers.set("Authorization", `Bearer ${token}`);
-  if (init.body && !headers.has("Content-Type"))
-    headers.set("Content-Type", "application/json");
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  if (init.body && !headers.has('Content-Type'))
+    headers.set('Content-Type', 'application/json');
 
   const resp = await fetch(`${API_BASE}${path}`, { ...init, headers });
   let body: ApiEnvelope<T> | null = null;
@@ -177,14 +177,14 @@ async function request<T>(
 
 // ---------------- 业务接口 ----------------
 export interface LoginParams {
-  identity_type: "phone" | "email";
+  identity_type: 'phone' | 'email';
   identifier: string;
   password: string;
   device_id?: string;
 }
 
 export interface RegisterParams {
-  identity_type: "phone" | "email";
+  identity_type: 'phone' | 'email';
   identifier: string;
   password: string;
   nickname?: string;
@@ -192,40 +192,40 @@ export interface RegisterParams {
 
 export const authApi = {
   login: (params: LoginParams) =>
-    request<TokenPair & { account_uuid: string }>("/api/v1/auth/login", {
-      method: "POST",
+    request<TokenPair & { account_uuid: string }>('/api/v1/auth/login', {
+      method: 'POST',
       body: JSON.stringify(params),
     }),
   register: (params: RegisterParams) =>
-    request<{ account_uuid: string }>("/api/v1/auth/register", {
-      method: "POST",
+    request<{ account_uuid: string }>('/api/v1/auth/register', {
+      method: 'POST',
       body: JSON.stringify(params),
     }),
   logout: (all_devices = false) =>
-    request<{ all_devices: boolean }>("/api/v1/auth/logout", {
-      method: "POST",
+    request<{ all_devices: boolean }>('/api/v1/auth/logout', {
+      method: 'POST',
       body: JSON.stringify({ all_devices }),
     }),
-  me: () => request<AccountInfo>("/api/v1/account/me", { method: "GET" }),
+  me: () => request<AccountInfo>('/api/v1/account/me', { method: 'GET' }),
 
   // 管理端
   listAccounts: (page: number, pageSize: number) =>
     request<{ total: number; items: AdminAccountItem[] }>(
       `/api/v1/admin/accounts?page=${page}&page_size=${pageSize}`,
-      { method: "GET" },
+      { method: 'GET' },
     ),
   listRoles: () =>
-    request<RoleItem[]>("/api/v1/admin/roles", { method: "GET" }),
+    request<RoleItem[]>('/api/v1/admin/roles', { method: 'GET' }),
   getAccountRoles: (uuid: string) =>
     request<{ account_uuid: string; role_codes: string[] }>(
       `/api/v1/admin/accounts/${uuid}/roles`,
-      { method: "GET" },
+      { method: 'GET' },
     ),
   assignRoles: (uuid: string, roleCodes: string[]) =>
     request<{ account_uuid: string; roles: string[] }>(
       `/api/v1/admin/accounts/${uuid}/roles`,
       {
-        method: "POST",
+        method: 'POST',
         body: JSON.stringify({ role_codes: roleCodes }),
       },
     ),
@@ -241,28 +241,28 @@ export interface ThreadItem {
 }
 
 export interface ThreadMessage {
-  role: "user" | "assistant";
+  role: 'user' | 'assistant';
   content: string;
 }
 
 export const threadApi = {
-  list: () => request<ThreadItem[]>("/api/v1/threads", { method: "GET" }),
+  list: () => request<ThreadItem[]>('/api/v1/threads', { method: 'GET' }),
   create: (title?: string) =>
-    request<ThreadItem>("/api/v1/threads", {
-      method: "POST",
+    request<ThreadItem>('/api/v1/threads', {
+      method: 'POST',
       body: JSON.stringify(title ? { title } : {}),
     }),
   rename: (threadId: string, title: string) =>
     request<ThreadItem>(`/api/v1/threads/${threadId}`, {
-      method: "PATCH",
+      method: 'PATCH',
       body: JSON.stringify({ title }),
     }),
   remove: (threadId: string) =>
     request<{ thread_id: string }>(`/api/v1/threads/${threadId}`, {
-      method: "DELETE",
+      method: 'DELETE',
     }),
   messages: (threadId: string) =>
     request<ThreadMessage[]>(`/api/v1/threads/${threadId}/messages`, {
-      method: "GET",
+      method: 'GET',
     }),
 };

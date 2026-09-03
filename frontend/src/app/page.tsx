@@ -1,19 +1,24 @@
-"use client";
+'use client';
 
 import {
+  ApiOutlined,
   CloudUploadOutlined,
   DeleteOutlined,
   EditOutlined,
   EllipsisOutlined,
   GlobalOutlined,
   LogoutOutlined,
-  TeamOutlined,
   PaperClipOutlined,
   QuestionCircleOutlined,
   ShareAltOutlined,
   SyncOutlined,
+  TeamOutlined,
 } from '@ant-design/icons';
-import type { BubbleListProps, ThoughtChainItemProps } from '@ant-design/x';
+import type {
+  BubbleListProps,
+  ThoughtChainItemProps,
+  ThoughtChainItemType,
+} from '@ant-design/x';
 import {
   Actions,
   Attachments,
@@ -31,32 +36,53 @@ import XMarkdown from '@ant-design/x-markdown';
 import type { DefaultMessageInfo } from '@ant-design/x-sdk';
 import {
   DeepSeekChatProvider,
-  SSEFields,
+  type SSEFields,
+  type TransformMessage,
   useXChat,
   useXConversations,
-  XModelParams,
-  XModelResponse,
+  type XModelParams,
+  type XModelResponse,
   XRequest,
 } from '@ant-design/x-sdk';
-import { Avatar, Button, Dropdown, Flex, type GetProp, Input, message, Modal, Pagination, Space, Spin } from 'antd';
+import {
+  Avatar,
+  Button,
+  Dropdown,
+  Flex,
+  type GetProp,
+  Input,
+  Modal,
+  message,
+  Pagination,
+  Space,
+  Spin,
+} from 'antd';
+import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import '@ant-design/x-markdown/themes/light.css';
 import '@ant-design/x-markdown/themes/dark.css';
-import { BubbleListRef } from '@ant-design/x/es/bubble';
-import { API_BASE, ApiError, getValidAccessToken, threadApi, type ThreadItem } from '@/lib/api';
+import type { BubbleListRef } from '@ant-design/x/es/bubble';
+import {
+  API_BASE,
+  ApiError,
+  getValidAccessToken,
+  type ThreadItem,
+  threadApi,
+} from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { useMarkdownTheme } from '@/x-markdown/demo/_utils';
 import {
+  type AgentEvent,
   type ChatMessage,
   DESIGN_GUIDE,
   HOT_TOPICS,
   SENDER_PROMPTS,
   THOUGHT_CHAIN_CONFIG,
 } from './_utils/config';
-import { useStyle } from './_utils/styles';
 import locale from './_utils/local';
+import { useStyle } from './_utils/styles';
 
 // 后端 agent_threads.title 的默认值(首轮乐观更新标题与其保持一致)
 const DEFAULT_THREAD_TITLE = '新会话';
@@ -159,44 +185,97 @@ const Footer: React.FC<{
 
 // ==================== Chat Provider ====================
 /**
+ * DeepSeekChatProvider 扩展: 在解析文本/推理增量之外, 把 SSE `agent` 字段
+ * (后端 /api/chat 的工具链事件扩展, 基类只读 choices[].delta 故天然兼容)
+ * 累积到 extraInfo.agentEvents, 供 assistant 气泡头部渲染思维链。
+ */
+class ToolChainChatProvider extends DeepSeekChatProvider<
+  ChatMessage,
+  XModelParams,
+  Partial<Record<SSEFields, XModelResponse>>
+> {
+  transformMessage(
+    info: TransformMessage<
+      ChatMessage,
+      Partial<Record<SSEFields, XModelResponse>>
+    >,
+  ): ChatMessage {
+    const message = super.transformMessage(info);
+    const { originMessage, chunk, responseHeaders } = info;
+
+    let agentEvent: AgentEvent | undefined;
+    try {
+      let parsed: { agent?: AgentEvent } | undefined;
+      if (responseHeaders.get('content-type')?.includes('text/event-stream')) {
+        const data = (chunk as { data?: unknown })?.data;
+        if (typeof data === 'string' && data.trim() !== '[DONE]') {
+          parsed = JSON.parse(data);
+        }
+      } else {
+        parsed = chunk as { agent?: AgentEvent } | undefined;
+      }
+      agentEvent = parsed?.agent;
+    } catch {
+      agentEvent = undefined;
+    }
+
+    const previousEvents = originMessage?.extraInfo?.agentEvents ?? [];
+    const agentEvents = agentEvent
+      ? [...previousEvents, agentEvent]
+      : previousEvents;
+    if (agentEvents.length === 0) return message;
+    return {
+      ...message,
+      extraInfo: { ...originMessage?.extraInfo, agentEvents },
+    };
+  }
+}
+
+/**
  * 🔔 Please replace the BASE_URL, MODEL with your own values.
  */
-const providerCaches = new Map<string, DeepSeekChatProvider>();
+const providerCaches = new Map<string, ToolChainChatProvider>();
 const providerFactory = (conversationKey: string) => {
   if (!providerCaches.get(conversationKey)) {
     providerCaches.set(
       conversationKey,
-      new DeepSeekChatProvider({
-        request: XRequest<XModelParams, Partial<Record<SSEFields, XModelResponse>>>(
-          `${API_BASE}/api/chat`,
-          {
-            manual: true,
-            params: {
-            },
-            // 每次发起对话前注入最新 Access Token(临近过期自动无感续期);
-            // body.messages 只保留最后一条(多轮记忆由后端 checkpointer 维护, 避免重复累积),
-            // 并强制注入 conversation_id(对应 agent_threads.thread_id)。
-            middlewares: {
-              onRequest: async (url, options) => {
-                const token = await getValidAccessToken();
-                const headers: Record<string, string> = { ...(options.headers || {}) };
-                if (token) headers.Authorization = `Bearer ${token}`;
-                let body = options.body;
-                try {
-                  const parsed = JSON.parse(String(options.body));
-                  if (Array.isArray(parsed?.messages) && parsed.messages.length > 1) {
-                    parsed.messages = [parsed.messages[parsed.messages.length - 1]];
-                  }
-                  parsed.conversation_id = conversationKey;
-                  body = JSON.stringify(parsed);
-                } catch {
-                  /* body 非 JSON 时保持原样 */
+      new ToolChainChatProvider({
+        request: XRequest<
+          XModelParams,
+          Partial<Record<SSEFields, XModelResponse>>
+        >(`${API_BASE}/api/chat`, {
+          manual: true,
+          params: {},
+          // 每次发起对话前注入最新 Access Token(临近过期自动无感续期);
+          // body.messages 只保留最后一条(多轮记忆由后端 checkpointer 维护, 避免重复累积),
+          // 并强制注入 conversation_id(对应 agent_threads.thread_id)。
+          middlewares: {
+            onRequest: async (url, options) => {
+              const token = await getValidAccessToken();
+              const headers: Record<string, string> = {
+                ...(options.headers || {}),
+              };
+              if (token) headers.Authorization = `Bearer ${token}`;
+              let body = options.body;
+              try {
+                const parsed = JSON.parse(String(options.body));
+                if (
+                  Array.isArray(parsed?.messages) &&
+                  parsed.messages.length > 1
+                ) {
+                  parsed.messages = [
+                    parsed.messages[parsed.messages.length - 1],
+                  ];
                 }
-                return [url, { ...options, headers, body }];
-              },
+                parsed.conversation_id = conversationKey;
+                body = JSON.stringify(parsed);
+              } catch {
+                /* body 非 JSON 时保持原样 */
+              }
+              return [url, { ...options, headers, body }];
             },
           },
-        ),
+        }),
       }),
     );
   }
@@ -224,19 +303,68 @@ const fetchThreadHistory = async (info?: {
 const getRole = (className: string): BubbleListProps['role'] => ({
   assistant: {
     placement: 'start',
-    header: (_, { status }) => {
-      const config = THOUGHT_CHAIN_CONFIG[status as keyof typeof THOUGHT_CHAIN_CONFIG];
-      return config ? (
-        <ThoughtChain.Item
+    header: (_, { status, extraInfo }) => {
+      const config =
+        THOUGHT_CHAIN_CONFIG[status as keyof typeof THOUGHT_CHAIN_CONFIG];
+      const agentEvents = (extraInfo as ChatMessage['extraInfo'])?.agentEvents;
+      if (!agentEvents || agentEvents.length === 0) {
+        return config ? (
+          <ThoughtChain.Item
+            style={{
+              marginBottom: 8,
+            }}
+            status={config.status as ThoughtChainItemProps['status']}
+            variant="solid"
+            icon={<GlobalOutlined />}
+            title={config.title}
+          />
+        ) : null;
+      }
+      // 按工具调用 id 合并: tool_call → loading, 对应 tool_result 到达 → success
+      const steps = new Map<
+        string,
+        { name: string; status: 'loading' | 'success'; result?: string }
+      >();
+      for (const event of agentEvents) {
+        if (event.type === 'tool_call') {
+          steps.set(event.id, { name: event.name, status: 'loading' });
+        } else {
+          const pending = steps.get(event.id);
+          steps.set(event.id, {
+            name: event.name || pending?.name || '',
+            status: 'success',
+            result: event.result,
+          });
+        }
+      }
+      const items: ThoughtChainItemType[] = [...steps.entries()].map(
+        ([id, step]) => ({
+          key: `tool-${id}`,
+          icon: <ApiOutlined />,
+          title: step.name,
+          description:
+            step.status === 'success'
+              ? locale.toolReturned
+              : locale.toolExecuting,
+          status: step.status,
+          collapsible: !!step.result,
+          content: step.result,
+        }),
+      );
+      items.push({
+        key: 'model-status',
+        icon: <GlobalOutlined />,
+        title: config?.title,
+        status: config?.status as ThoughtChainItemProps['status'],
+      });
+      return (
+        <ThoughtChain
           style={{
             marginBottom: 8,
           }}
-          status={config.status as ThoughtChainItemProps['status']}
-          variant="solid"
-          icon={<GlobalOutlined />}
-          title={config.title}
+          items={items}
         />
-      ) : null;
+      );
     },
     footer: (content, { status, key, extraInfo }) => (
       <Footer
@@ -246,8 +374,9 @@ const getRole = (className: string): BubbleListProps['role'] => ({
         id={key as string}
       />
     ),
-    contentRender: (content: any, { status }) => {
-      const newContent = content.replace(/\n\n/g, '<br/><br/>');
+    contentRender: (content: React.ReactNode, { status }) => {
+      const text = typeof content === 'string' ? content : '';
+      const newContent = text.replace(/\n\n/g, '<br/><br/>');
       return (
         <XMarkdown
           paragraphTag="div"
@@ -285,13 +414,18 @@ const Independent: React.FC = () => {
   const [className] = useMarkdownTheme();
   const [messageApi, contextHolder] = message.useMessage();
   const [attachmentsOpen, setAttachmentsOpen] = useState(false);
-  const [attachedFiles, setAttachedFiles] = useState<GetProp<typeof Attachments, 'items'>>([]);
+  const [attachedFiles, setAttachedFiles] = useState<
+    GetProp<typeof Attachments, 'items'>
+  >([]);
 
   const [inputValue, setInputValue] = useState('');
 
   // 会话元数据(agent_threads)相关状态
   const [threadsReady, setThreadsReady] = useState(false);
-  const [renameTarget, setRenameTarget] = useState<{ key: string; label: string } | null>(null);
+  const [renameTarget, setRenameTarget] = useState<{
+    key: string;
+    label: string;
+  } | null>(null);
   const [renameValue, setRenameValue] = useState('');
 
   const listRef = useRef<BubbleListRef>(null);
@@ -308,7 +442,9 @@ const Independent: React.FC = () => {
     isDefaultMessagesRequesting,
   } = useXChat<ChatMessage>({
     // every conversation has its own provider
-    provider: activeConversationKey ? providerFactory(activeConversationKey) : undefined,
+    provider: activeConversationKey
+      ? providerFactory(activeConversationKey)
+      : undefined,
     conversationKey: activeConversationKey,
     defaultMessages: fetchThreadHistory,
     requestPlaceholder: () => {
@@ -352,7 +488,9 @@ const Independent: React.FC = () => {
       addConversation({ key: thread.thread_id, label: thread.title });
       setActiveConversationKey(thread.thread_id);
     } catch (err) {
-      messageApi.error(err instanceof ApiError ? err.message : locale.requestFailed);
+      messageApi.error(
+        err instanceof ApiError ? err.message : locale.requestFailed,
+      );
     }
   }, [addConversation, setActiveConversationKey, messageApi]);
 
@@ -370,7 +508,9 @@ const Independent: React.FC = () => {
         }
       } catch (err) {
         if (!cancelled) {
-          messageApi.error(err instanceof ApiError ? err.message : locale.requestFailed);
+          messageApi.error(
+            err instanceof ApiError ? err.message : locale.requestFailed,
+          );
         }
       } finally {
         if (!cancelled) setThreadsReady(true);
@@ -379,7 +519,13 @@ const Independent: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [user, loadThreads, createNewConversation, messageApi, setActiveConversationKey]);
+  }, [
+    user,
+    loadThreads,
+    createNewConversation,
+    messageApi,
+    setActiveConversationKey,
+  ]);
 
   if (initializing || !user || !threadsReady) {
     return (
@@ -414,7 +560,7 @@ const Independent: React.FC = () => {
     <div className={styles.side}>
       {/* 🌟 Logo */}
       <div className={styles.logo}>
-        <img
+        <Image
           src="https://mdn.alipayobjects.com/huamei_iwk9zp/afts/img/A*eco6RrQhxbMAAAAAAAAAAAAADgCCAQ/original"
           draggable={false}
           alt="logo"
@@ -432,7 +578,10 @@ const Independent: React.FC = () => {
         }}
         items={conversations.map(({ key, label, ...other }) => ({
           key,
-          label: key === activeConversationKey ? `[${locale.curConversation}]${label}` : label,
+          label:
+            key === activeConversationKey
+              ? `[${locale.curConversation}]${label}`
+              : label,
           ...other,
         }))}
         className={styles.conversations}
@@ -447,7 +596,11 @@ const Independent: React.FC = () => {
               key: 'rename',
               icon: <EditOutlined />,
               onClick: () => {
-                setRenameValue(typeof conversation.label === 'string' ? conversation.label : '');
+                setRenameValue(
+                  typeof conversation.label === 'string'
+                    ? conversation.label
+                    : '',
+                );
                 setRenameTarget({
                   key: conversation.key,
                   label: String(conversation.label ?? ''),
@@ -461,12 +614,19 @@ const Independent: React.FC = () => {
               danger: true,
               onClick: () => {
                 threadApi.remove(conversation.key).catch((err) => {
-                  messageApi.error(err instanceof ApiError ? err.message : locale.requestFailed);
+                  messageApi.error(
+                    err instanceof ApiError
+                      ? err.message
+                      : locale.requestFailed,
+                  );
                 });
-                const newList = conversations.filter((item) => item.key !== conversation.key);
+                const newList = conversations.filter(
+                  (item) => item.key !== conversation.key,
+                );
                 setConversations(newList);
                 if (conversation.key === activeConversationKey) {
-                  if (newList.length > 0) setActiveConversationKey(newList[0].key);
+                  if (newList.length > 0)
+                    setActiveConversationKey(newList[0].key);
                   else void createNewConversation();
                 }
               },
@@ -489,7 +649,12 @@ const Independent: React.FC = () => {
                     },
                   ]
                 : []),
-              { key: 'logout', icon: <LogoutOutlined />, label: '退出登录', danger: true },
+              {
+                key: 'logout',
+                icon: <LogoutOutlined />,
+                label: '退出登录',
+                danger: true,
+              },
             ],
             onClick: ({ key }) => {
               if (key === 'logout') {
@@ -511,7 +676,11 @@ const Independent: React.FC = () => {
   const chatList = (
     <div className={styles.chatList}>
       {isDefaultMessagesRequesting ? (
-        <Flex align="center" justify="center" style={{ flex: 1, minHeight: 200 }}>
+        <Flex
+          align="center"
+          justify="center"
+          style={{ flex: 1, minHeight: 200 }}
+        >
           <Spin />
         </Flex>
       ) : messages?.length ? (
@@ -523,7 +692,9 @@ const Independent: React.FC = () => {
             key: i.id,
             status: i.status,
             loading: i.status === 'loading',
-            extraInfo: i.extraInfo,
+            // provider 将工具链事件写入 message.extraInfo, 而反馈等交互写入
+            // MessageInfo.extraInfo; 两者合并后传给气泡 header/footer。
+            extraInfo: { ...i.message.extraInfo, ...i.extraInfo },
           }))}
           styles={{
             root: {
@@ -570,7 +741,8 @@ const Independent: React.FC = () => {
                 list: { height: '100%' },
                 item: {
                   flex: 1,
-                  backgroundImage: 'linear-gradient(123deg, #e5f4ff 0%, #efe7ff 100%)',
+                  backgroundImage:
+                    'linear-gradient(123deg, #e5f4ff 0%, #efe7ff 100%)',
                   borderRadius: 12,
                   border: 'none',
                 },
@@ -587,7 +759,8 @@ const Independent: React.FC = () => {
               styles={{
                 item: {
                   flex: 1,
-                  backgroundImage: 'linear-gradient(123deg, #e5f4ff 0%, #efe7ff 100%)',
+                  backgroundImage:
+                    'linear-gradient(123deg, #e5f4ff 0%, #efe7ff 100%)',
                   borderRadius: 12,
                   border: 'none',
                 },
@@ -694,12 +867,16 @@ const Independent: React.FC = () => {
               const updated = await threadApi.rename(renameTarget.key, title);
               setConversations(
                 conversations.map((c) =>
-                  c.key === renameTarget.key ? { ...c, label: updated.title } : c,
+                  c.key === renameTarget.key
+                    ? { ...c, label: updated.title }
+                    : c,
                 ),
               );
               setRenameTarget(null);
             } catch (err) {
-              messageApi.error(err instanceof ApiError ? err.message : locale.requestFailed);
+              messageApi.error(
+                err instanceof ApiError ? err.message : locale.requestFailed,
+              );
             }
           }}
           destroyOnClose
