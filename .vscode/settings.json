@@ -1,0 +1,19 @@
+{
+  // uv 项目: 解释器固定指向 backend/.venv (由 `uv sync` 创建/维护)
+  "python.defaultInterpreterPath": "${workspaceFolder}/backend/.venv/bin/python",
+  "python.terminal.activateEnvironment": true,
+  // 测试发现: 以 backend/ 为根运行, 保证 pyproject.toml 中的 pytest 配置生效 (asyncio_mode=auto 必需)
+  "python.testing.cwd": "${workspaceFolder}/backend",
+  "python.testing.pytestEnabled": true,
+  "python.testing.unittestEnabled": false,
+  "python.testing.pytestArgs": ["tests"],
+  // 新增/更新依赖后自动同步虚拟环境, 避免解释器与锁文件不一致
+  "python.venvPath": "${workspaceFolder}/backend",
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.codeActionsOnSave": {
+      "source.fixAll.ruff": "explicit",
+      "source.organizeImports.ruff": "explicit"
+    }
+  }
+}

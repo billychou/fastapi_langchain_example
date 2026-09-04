@@ -1,0 +1,29 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      // 调试 FastAPI: F5 启动后访问 http://127.0.0.1:5001/docs 触发断点
+      // 注意: 不要加 --reload, reload 会 fork 子进程导致断点不命中
+      "name": "Debug FastAPI (uvicorn)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["app.main:app", "--port", "5001"],
+      "cwd": "${workspaceFolder}/backend",
+      "envFile": "${workspaceFolder}/backend/.env",
+      // justMyCode=false: 单步调试可跳入 fastapi/langchain/sqlalchemy 等第三方库源码
+      "justMyCode": false
+    },
+    {
+      // 调试当前打开的测试文件
+      "name": "Debug pytest 当前文件",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": ["${file}", "-q"],
+      "cwd": "${workspaceFolder}/backend",
+      "envFile": "${workspaceFolder}/backend/.env",
+      "justMyCode": false
+    }
+  ]
+}
