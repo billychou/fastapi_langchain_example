@@ -19,7 +19,7 @@ docker compose up -d   # MySQL 8 + Redis 7 (migrations auto-run on first boot)
 uv run uvicorn app.main:app --reload --port 5001
 ```
 
-Without any LLM API key the server falls back to a deterministic `MockChatModel` — canned replies plus demo tool calls — so the full agent loop (model → tool → model) works out of the box. Try `现在几点了`, `北京天气怎么样`, `计算 12 * (3 + 4)`.
+Without any LLM API key the server falls back to a deterministic `MockChatModel` — canned replies plus demo tool calls — so the full agent loop (model → tool → model) works out of the box. Try `现在几点了`, `北京天气怎么样`, `计算 12 * (3 + 4)`, `你有什么技能` (the mock model also demos the skill-loading tool chain).
 
 Chat requires login by default (`CHAT_REQUIRE_AUTH=true`): register an account via `POST /api/v1/auth/register` (or the frontend `/register` page) first. Set it to `false` to allow anonymous chat.
 
@@ -59,6 +59,8 @@ Backend reads `backend/.env` (see `.env.example`). Key vars:
 | `CORS_ORIGINS` | comma-separated origins | Default includes `localhost:3000` and `localhost:5173` |
 | `CHECKPOINT_BACKEND` | `sqlite` / `postgres` | Conversation-memory store (LangGraph checkpointer). `sqlite` (default) keeps a local file via `CHECKPOINT_DB_PATH`; `postgres` for production / multi-replica |
 | `CHECKPOINT_DATABASE_URL` | `postgres://user:pass@host:5432/db` | Required when `CHECKPOINT_BACKEND=postgres`; `checkpoint_*` tables are created automatically on first boot |
+| `SKILLS_ENABLED` / `SKILLS_DIR` | `true` / `./skills` | Agent skill directories (see `backend/docs/skills-design.md`). Skills hot-reload on change — no restart needed |
+| `SKILL_MAX_CATALOG_CHARS` / `SKILL_MAX_BODY_CHARS` / `SKILL_MAX_FILE_BYTES` | `2000` / `8000` / `262144` | Context budgets for the three disclosure levels of a skill |
 
 Settings are lru-cached at startup — restart after editing `.env`.
 
@@ -105,11 +107,16 @@ Hardening (all tunable via env):
 
 `POST /api/v1/auth/register` · `POST /api/v1/auth/login` (dual-token) · `POST /api/v1/auth/refresh` (rotation + reuse detection) · `POST /api/v1/auth/logout` · `GET /api/v1/account/me` · `PATCH /api/v1/account/profile` · `GET /api/v1/admin/accounts` · `POST /api/v1/admin/accounts/{uuid}/roles` — see `backend/README.md` for the full table and `backend/docs/architecture.md` for sequence diagrams. Responses use a `{code, message, data}` envelope.
 
+### Skills (`/api/v1/skills`)
+
+`GET /api/v1/skills` lists the skills visible to the caller (`?scope=all` plus `POST /api/v1/skills/reload` require the `skill:admin` permission), `GET /api/v1/skills/{name}` returns the exact body the model receives from `load_skill`, and `GET /api/v1/skills/{name}/files/{path}` serves skill attachments. Skills the caller cannot see are reported as 404 (never 403) so names cannot be enumerated.
+
 ## Architecture notes
 
-- **Agent** — `backend/app/agent.py` `get_agent()` (lru-cached): `create_agent(model, tools=ALL_TOOLS, system_prompt, checkpointer)`. Conversation memory is persisted by a LangGraph checkpointer: SQLite by default (`CHECKPOINT_BACKEND=sqlite`), PostgreSQL in compose/production (`CHECKPOINT_BACKEND=postgres`), schema managed via Alembic for the app tables and auto-created `checkpoint_*` tables.
-- **Mock model** — `MockChatModel` streams canned replies and emits demo tool calls for time/weather/math. Lets the UI run end-to-end with no credentials. Check `GET /api/health` `provider` field to confirm which model is active.
+- **Agent** — `backend/app/agent.py` `get_agent()` (lru-cached): `create_agent(model, tools=[*ALL_TOOLS, *SKILL_TOOLS], system_prompt, middleware=[SkillMiddleware()], context_schema=ChatContext, checkpointer)`. Conversation memory is persisted by a LangGraph checkpointer: SQLite by default (`CHECKPOINT_BACKEND=sqlite`), PostgreSQL in compose/production (`CHECKPOINT_BACKEND=postgres`), schema managed via Alembic for the app tables and auto-created `checkpoint_*` tables.
+- **Mock model** — `MockChatModel` streams canned replies and emits demo tool calls for time/weather/math plus a `load_skill` call for skill questions. Lets the UI run end-to-end with no credentials. Check `GET /api/health` `provider` field to confirm which model is active.
 - **Tools** (`backend/app/tools.py`) — `get_current_time`, `calculate` (AST-based safe eval, not `eval`), `get_weather` (mock data).
+- **Skills** (`backend/skills/`, `backend/app/skills/`) — a skill is a directory with a `SKILL.md` (YAML frontmatter + instructions) plus optional reference files, delivered to the model in three levels of progressive disclosure (catalog in the system prompt → body via `load_skill` → attachments via `read_skill_file`). Visibility reuses the existing RBAC permissions (`public` / `auth` / `permission`), skills hot-reload from disk without a restart, and the same registry backs both the agent and the `/api/v1/skills` endpoints. See `backend/docs/skills-design.md`.
 - **SSE format** — OpenAI-style chunks so `@ant-design/x-sdk`'s `DeepSeekChatProvider` parses them directly. On top of `choices[].delta`, each event may carry an `agent` field (`tool_call`/`tool_result`) that the UI renders as a thought chain; clients that only read deltas ignore it.
 - **Frontend provider** — One `ToolChainChatProvider` (a `DeepSeekChatProvider` subclass that accumulates the `agent` tool-chain events) per conversation key, cached in `providerCaches`. `useXChat` manages streaming state, retry, abort.
 - **Next.js 16 caveat** — This repo's Next.js has breaking changes vs. prior versions; see `frontend/AGENTS.md` before touching Next.js-specific code.

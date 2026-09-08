@@ -7,8 +7,9 @@ FastAPI + LangChain agent backend (SSE chat, dual-token JWT auth + RBAC) with a 
 ## Project Structure & Module Organization
 
 - `backend/app/` — FastAPI source: `main.py`, `agent.py`, `tools.py`, `config.py`, plus `core/`, `services/`, `models/`, `schemas/`, `api/v1/`, `db/`, `middleware/`.
+- `backend/app/skills/` — agent skill subsystem (`schema.py` manifest + `allows()` RBAC gate, `loader.py`, `security.py`, `registry.py`, `tools.py`); `backend/app/context.py` — per-request `ChatContext`; `backend/app/middleware/agent_skills.py` — `SkillMiddleware` (LangChain agent middleware, not Starlette). `backend/skills/<name>/SKILL.md` — the skills themselves (data, not code).
 - `backend/tests/` — pytest suite (`conftest.py` freezes MySQL/Redis/LLM to mocks and dead ports). New backend behaviour gets a test file here.
-- `backend/migrations/` — fresh-database bootstrap SQL (DDL + RBAC seed + alembic version stamp). `backend/alembic/` — Alembic migrations; all schema changes after bootstrap go here (`uv run alembic revision --autogenerate`, then `uv run alembic upgrade head`). `backend/docker-compose.yml` — local MySQL 8 + Redis 7. `backend/docs/architecture.md` — diagrams and token flows.
+- `backend/migrations/` — fresh-database bootstrap SQL (DDL + RBAC seed + alembic version stamp). `backend/alembic/` — Alembic migrations; all schema changes after bootstrap go here (`uv run alembic revision --autogenerate`, then `uv run alembic upgrade head`). `backend/docker-compose.yml` — local MySQL 8 + Redis 7. `backend/docs/architecture.md` — diagrams and token flows. `backend/docs/skills-design.md` — how the skill subsystem works and how to add a skill.
 - `frontend/src/app/` — App Router pages: `page.tsx` (chat), `login/`, `register/`, `users/`. `frontend/src/lib/` — auth context, API client. `frontend/public/` — static assets.
 
 ## Build, Test, and Development Commands
@@ -18,7 +19,7 @@ Backend (Python 3.13, `uv`, from `backend/`) — on this machine always prefix `
 - `UV_DEFAULT_INDEX=https://pypi.org/simple/ uv sync` — install dependencies; `cp .env.example .env` — then set LLM keys and `JWT_SECRET_KEY`.
 - `docker compose up -d` — MySQL + Redis; migrations auto-run on first boot.
 - `uv run uvicorn app.main:app --reload --port 5001` — run the API (`/docs` for Swagger).
-- `uv run ruff check .` and `uv run pytest -q` — lint + tests (104 tests today; keep the suite green).
+- `uv run ruff check .` and `uv run pytest -q` — lint + tests (179 tests today; keep the suite green).
 
 Frontend (`pnpm` 10, from `frontend/`):
 
@@ -56,7 +57,7 @@ One working feature = one commit (or a short series of green commits). If you ar
 
 ## Testing Guidelines
 
-Backend: `uv run pytest -q` (104 tests; `tests/conftest.py` freezes MySQL/Redis/LLM to mocks/dead ports, no external deps needed) + `uv run ruff check .`. Cover new endpoints, tools, and auth/session logic with tests in the matching `backend/tests/test_*.py`; reuse the existing fixtures instead of reaching for real services. CI (`.github/workflows/ci.yml`) runs `ruff check` + `pytest` for the backend and `biome check` for the frontend (the frontend job does **not** run `pnpm build`, so build locally before committing), and rejects mirror URLs in `uv.lock` (regenerate with `UV_DEFAULT_INDEX=https://pypi.org/simple/ uv lock`). Frontend has no test runner — verify with `pnpm lint` + `pnpm build`, then run both apps and exercise the chat flow — try "现在几点了" to test the tool-call loop (and the tool-chain thought-chain UI) in mock mode. Check the active model via `provider` on `GET /api/health`.
+Backend: `uv run pytest -q` (179 tests; `tests/conftest.py` freezes MySQL/Redis/LLM to mocks/dead ports, no external deps needed) + `uv run ruff check .`. Cover new endpoints, tools, skills (loader / visibility / security / API), and auth/session logic with tests in the matching `backend/tests/test_*.py`; reuse the existing fixtures instead of reaching for real services. CI (`.github/workflows/ci.yml`) runs `ruff check` + `pytest` for the backend and `biome check` for the frontend (the frontend job does **not** run `pnpm build`, so build locally before committing), and rejects mirror URLs in `uv.lock` (regenerate with `UV_DEFAULT_INDEX=https://pypi.org/simple/ uv lock`). Frontend has no test runner — verify with `pnpm lint` + `pnpm build`, then run both apps and exercise the chat flow — try "现在几点了" to test the tool-call loop (and the tool-chain thought-chain UI) and "你有什么技能" to test the skill tools in mock mode. Check the active model via `provider` on `GET /api/health`.
 
 ## Commit & Pull Request Guidelines
 
@@ -72,5 +73,6 @@ Commit subjects are imperative, capitalized, unprefixed (e.g. `Add login and reg
 ## Agent-Specific Instructions
 
 - `frontend/AGENTS.md` warns that this repo's Next.js 16 has breaking changes — consult `frontend/node_modules/next/dist/docs/` before writing Next.js code, and don't delete its auto-regenerated block.
+- Skills are directories under `backend/skills/`, not code: adding one means writing a `SKILL.md` (frontmatter `name` must equal the directory name, `tools` must reference real entries in `ALL_TOOLS`) plus tests, and seeding a `skill:<name>:use` permission via an Alembic migration if it is gated. See `backend/docs/skills-design.md`.
 - `CLAUDE.md` holds the longer architecture walkthrough (SSE event shape, agent/tool internals, auth service); keep it in sync when you change those areas.
 - See `backend/README.md` for the full auth API table.
