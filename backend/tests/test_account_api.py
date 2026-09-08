@@ -19,6 +19,7 @@ from sqlalchemy.ext.compiler import compiles
 
 ME = "/api/v1/account/me"
 PROFILE = "/api/v1/account/profile"
+POLICY = "/api/v1/account/login-policy"
 
 
 @compiles(BigInteger, "sqlite")
@@ -247,6 +248,109 @@ async def test_update_profile_unknown_account_raises_not_found(env: Env):
                 account_id=999,
                 nickname="幽灵",
                 avatar_url=None,
+                meta=ClientMeta(ip="127.0.0.1"),
+            )
+    assert int(exc_info.value.code) == 40400
+
+
+async def _add_session(env: Env, sid: str) -> None:
+    """再开一个在线会话(模拟另一台设备), 用于验证单端互踢。"""
+    from app.services.session_store import SessionStore
+
+    await SessionStore(env.redis).create_session(
+        account_id=1,
+        sid=sid,
+        refresh_jti=f"jti-{sid}",
+        ttl_seconds=3600,
+        device_id="dev-other",
+        ip="10.0.0.9",
+        user_agent="other-device",
+    )
+
+
+async def test_put_login_policy_single_device_kicks_other_sessions(env: Env):
+    from app.services.session_store import SessionStore
+
+    await _add_session(env, "sess-other")
+    store = SessionStore(env.redis)
+    assert await store.get_session(1, "sess-other") is not None
+
+    response = await env.client.put(POLICY, headers=env.auth(), json={"policy": "single_device"})
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["login_policy"] == "single_device"
+    assert data["kicked_sessions"] == 1
+
+    # 其他设备会话被撤销, 当前会话保留
+    assert await store.get_session(1, "sess-other") is None
+    assert await store.get_session(1, env.sid) is not None
+
+    # 策略落库 + /me 回读一致
+    from app.models import Account
+
+    async with env.factory() as session:
+        account = await session.get(Account, 1)
+        assert account.login_policy == "single_device"
+    me = (await env.client.get(ME, headers=env.auth())).json()["data"]
+    assert me["login_policy"] == "single_device"
+
+
+async def test_put_login_policy_multi_device_keeps_sessions(env: Env):
+    from app.services.session_store import SessionStore
+
+    await _add_session(env, "sess-other")
+    response = await env.client.put(POLICY, headers=env.auth(), json={"policy": "multi_device"})
+    assert response.status_code == 200
+    assert response.json()["data"]["kicked_sessions"] == 0
+
+    store = SessionStore(env.redis)
+    assert await store.get_session(1, "sess-other") is not None
+    assert await store.get_session(1, env.sid) is not None
+
+
+async def test_put_login_policy_rejects_unknown_value(env: Env):
+    response = await env.client.put(POLICY, headers=env.auth(), json={"policy": "nope"})
+    assert response.status_code == 400
+    body = response.json()
+    assert body["code"] == 40000
+    assert "policy" in body["message"]
+
+    # query 参数写法不再被接受(已切换为 JSON body)
+    legacy = await env.client.put(f"{POLICY}?policy=single_device", headers=env.auth())
+    assert legacy.status_code == 400
+    assert legacy.json()["code"] == 40000
+
+
+async def test_put_login_policy_requires_token(env: Env):
+    response = await env.client.put(POLICY, json={"policy": "single_device"})
+    assert response.status_code == 401
+    assert response.json()["code"] == 40100
+
+
+async def test_put_login_policy_writes_audit_log(env: Env):
+    from app.models import AuditLog
+
+    await env.client.put(POLICY, headers=env.auth(), json={"policy": "single_device"})
+    async with env.factory() as session:
+        rows = (await session.execute(select(AuditLog))).scalars().all()
+    assert len(rows) == 1
+    assert rows[0].action == "login_policy_change"
+    assert rows[0].detail == {"policy": "single_device", "kicked_sessions": 0}
+
+
+async def test_set_login_policy_unknown_account_raises_not_found(env: Env):
+    from app.exceptions import BizError
+    from app.services import account_service
+    from app.services.auth_service import ClientMeta
+
+    async with env.factory() as session:
+        with pytest.raises(BizError) as exc_info:
+            await account_service.set_login_policy(
+                session,
+                env.redis,
+                account_id=999,
+                session_id=env.sid,
+                policy="single_device",
                 meta=ClientMeta(ip="127.0.0.1"),
             )
     assert int(exc_info.value.code) == 40400

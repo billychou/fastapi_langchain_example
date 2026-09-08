@@ -15,6 +15,7 @@ from app.models.account import Account, UserProfile
 from app.schemas import AccountInfo
 from app.services import audit_service, rbac_service
 from app.services.auth_service import ClientMeta
+from app.services.session_store import SessionStore
 
 
 async def build_account_info(
@@ -89,3 +90,40 @@ async def update_profile(
             detail={"fields": changed},
         )
     return await build_account_info(db, redis, account)
+
+
+async def set_login_policy(
+    db: AsyncSession,
+    redis: Redis,
+    *,
+    account_id: int,
+    session_id: str,
+    policy: str,
+    meta: ClientMeta,
+) -> dict:
+    """切换登录策略; `single_device` 立即收敛为只保留当前会话。
+
+    策略变更是安全相关动作(会连带踢人), 因此无论取值是否真的变化都写审计,
+    便于回溯"谁在什么时候把账号切成单端/多端"。
+    """
+    account = await db.get(Account, account_id)
+    if account is None:
+        raise BizError(BizCode.NOT_FOUND, "账号不存在")
+    account.login_policy = policy
+    await db.commit()
+
+    kicked: list[str] = []
+    if policy == "single_device":
+        kicked = await SessionStore(redis).kick_other_sessions(account_id, keep_sid=session_id)
+
+    await audit_service.record_audit(
+        db,
+        account_id=account_id,
+        action="login_policy_change",
+        target_type="account",
+        target_id=str(account_id),
+        ip=meta.ip,
+        user_agent=meta.user_agent,
+        detail={"policy": policy, "kicked_sessions": len(kicked)},
+    )
+    return {"login_policy": policy, "kicked_sessions": len(kicked)}

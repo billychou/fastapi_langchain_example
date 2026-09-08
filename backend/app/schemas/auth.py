@@ -67,6 +67,12 @@ class AccountInfo(BaseModel):
     login_policy: str = "multi_device"
 
 
+class UpdateLoginPolicyRequest(BaseModel):
+    """登录策略切换: multi_device=多端并存, single_device=单端互踢(立即下线其他设备)。"""
+
+    policy: Literal["multi_device", "single_device"]
+
+
 class UpdateProfileRequest(BaseModel):
     """个人资料更新: 字段为 None 表示不修改; avatar_url 传空串表示清空头像。"""
 

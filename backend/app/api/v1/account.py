@@ -10,7 +10,7 @@ from app.db.session import get_db
 from app.deps import AuthContext, get_current, get_redis
 from app.exceptions import BizCode, BizError
 from app.models.account import Account
-from app.schemas import SessionInfo, UpdateProfileRequest
+from app.schemas import SessionInfo, UpdateLoginPolicyRequest, UpdateProfileRequest
 from app.schemas.common import ok
 from app.services import account_service
 from app.services.auth_service import ClientMeta
@@ -93,19 +93,19 @@ async def kick_session(
 
 @router.put("/login-policy", summary="切换登录策略(multi_device/single_device)")
 async def update_login_policy(
-    policy: str,
+    payload: UpdateLoginPolicyRequest,
+    request: Request,
     ctx: AuthContext = Depends(get_current),
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
-    if policy not in {"multi_device", "single_device"}:
-        raise BizError(BizCode.BAD_REQUEST, "策略取值非法")
-    account = await db.get(Account, ctx.account_id)
-    if account is None:
-        raise BizError(BizCode.NOT_FOUND, "账号不存在")
-    account.login_policy = policy
-    await db.commit()
-    if policy == "single_device":
-        # 立即收敛: 只保留当前会话
-        await SessionStore(redis).kick_other_sessions(ctx.account_id, keep_sid=ctx.session_id)
-    return ok({"login_policy": policy})
+    """JSON body 而非 query 参数: 与其余写接口一致, 且取值校验交给 Literal。"""
+    data = await account_service.set_login_policy(
+        db,
+        redis,
+        account_id=ctx.account_id,
+        session_id=ctx.session_id,
+        policy=payload.policy,
+        meta=_meta(request),
+    )
+    return ok(data)

@@ -110,6 +110,7 @@ uv run uvicorn app.main:app --reload --port 5001
 | PATCH | /api/v1/account/profile | 更新个人资料(昵称/头像 URL) | Access |
 | GET | /api/v1/account/sessions | 在线会话列表 | Access |
 | DELETE | /api/v1/account/sessions/{sid} | 下线指定设备 | Access |
+| PUT | /api/v1/account/login-policy | 切换登录策略(JSON body: `policy`) | Access |
 | GET | /api/v1/admin/accounts | 账号分页列表 | account:read |
 | GET | /api/v1/admin/roles | 角色列表 | rbac:read |
 | POST | /api/v1/admin/accounts/{uuid}/roles | 全量分配角色 | rbac:assign |
