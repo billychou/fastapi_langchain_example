@@ -561,7 +561,7 @@ const Independent: React.FC = () => {
       {/* 🌟 Logo */}
       <div className={styles.logo}>
         <Image
-          src="https://mdn.alipayobjects.com/huamei_iwk9zp/afts/img/A*eco6RrQhxbMAAAAAAAAAAAAADgCCAQ/original"
+          src="/logo.svg"
           draggable={false}
           alt="logo"
           width={24}
@@ -718,7 +718,10 @@ const Independent: React.FC = () => {
               width: '100%',
             }}
             variant="borderless"
-            icon="https://mdn.alipayobjects.com/huamei_iwk9zp/afts/img/A*s5sNRo5LjfQAAAAAAAAAAAAADgCCAQ/fmt.webp"
+            icon={
+              // biome-ignore lint/performance/noImgElement: Welcome 的 icon 插槽样式是 .ant-welcome-icon img{height:100%}, 必须是不带 width/height 的原生 img 才能按宽高比自适应; 资源是本地 4KB webp, 走 next/image 优化器没有收益
+              <img src="/welcome.webp" alt="" />
+            }
             title={locale.welcome}
             description={locale.welcomeDescription}
             extra={
