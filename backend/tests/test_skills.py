@@ -13,45 +13,7 @@ from app.skills import SkillRegistry, SkillSecurityError, load_skill_dir, scan_s
 from app.skills.loader import SkillLoadError, split_frontmatter
 from app.skills.schema import SkillManifest
 
-KNOWN_TOOLS = {"get_current_time", "calculate", "get_weather"}
-
-
-def write_skill(
-    root: Path,
-    name: str,
-    *,
-    description: str = "演示技能。",
-    visibility: str = "public",
-    requires_permissions: list[str] | None = None,
-    tools: list[str] | None = None,
-    body: str = "# 步骤\n1. 做事\n",
-    extra_files: dict[str, str] | None = None,
-) -> Path:
-    """在 root 下生成一个技能目录, 返回其路径。"""
-    skill_dir = root / name
-    (skill_dir / "references").mkdir(parents=True, exist_ok=True)
-    perms = requires_permissions or []
-    tool_list = tools or []
-    perm_line = "[" + ", ".join(perms) + "]"
-    tool_line = "[" + ", ".join(tool_list) + "]"
-    (skill_dir / "SKILL.md").write_text(
-        f"""---
-name: {name}
-description: {description}
-version: 1.2.0
-visibility: {visibility}
-requires_permissions: {perm_line}
-tools: {tool_line}
----
-
-{body}""",
-        encoding="utf-8",
-    )
-    for rel, content in (extra_files or {}).items():
-        target = skill_dir / rel
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content, encoding="utf-8")
-    return skill_dir
+from skills_helpers import KNOWN_TOOLS, write_skill
 
 
 def make_registry(root: Path, **kwargs) -> SkillRegistry:

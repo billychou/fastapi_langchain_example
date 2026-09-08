@@ -13,6 +13,7 @@ import base64
 import hashlib
 import os
 import tempfile
+from pathlib import Path
 
 
 def _b64_32(seed: str) -> str:
@@ -43,5 +44,7 @@ os.environ.update(
         "CHECKPOINT_DB_PATH": os.path.join(
             tempfile.mkdtemp(prefix="agent-ckpt-"), "checkpoints.sqlite"
         ),
+        # ---- 技能目录: 绝对路径, 不随 pytest 工作目录漂移 ----
+        "SKILLS_DIR": str(Path(__file__).resolve().parents[1] / "skills"),
     }
 )
