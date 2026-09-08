@@ -32,6 +32,8 @@ dev = [
     "pytest-asyncio>=0.24",
     "ruff>=0.8",
     "fakeredis[lua]>=2.26",
+    # 账号自服务接口测试用内存 SQLite 建表(生产仍为 MySQL)
+    "aiosqlite>=0.20",
 ]
 
 [tool.ruff]

@@ -64,6 +64,14 @@ class AccountInfo(BaseModel):
     phone_masked: str | None = None
     email_masked: str | None = None
     roles: list[str] = []
+    login_policy: str = "multi_device"
+
+
+class UpdateProfileRequest(BaseModel):
+    """个人资料更新: 字段为 None 表示不修改; avatar_url 传空串表示清空头像。"""
+
+    nickname: str | None = Field(default=None, max_length=64)
+    avatar_url: str | None = Field(default=None, max_length=512)
 
 
 class SessionInfo(BaseModel):

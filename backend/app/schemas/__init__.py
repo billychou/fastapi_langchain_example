@@ -10,6 +10,7 @@ from app.schemas.auth import (
     SessionInfo,
     SmsSendRequest,
     TokenPairResponse,
+    UpdateProfileRequest,
 )
 from app.schemas.chat import ChatRequest, MessageType
 from app.schemas.common import ok
@@ -33,6 +34,7 @@ __all__ = [
     "OAuthCallbackRequest",
     "TokenPairResponse",
     "AccountInfo",
+    "UpdateProfileRequest",
     "SessionInfo",
     "ThreadItem",
     "CreateThreadRequest",

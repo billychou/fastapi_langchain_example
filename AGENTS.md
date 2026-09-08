@@ -18,7 +18,7 @@ Backend (Python 3.13, `uv`, from `backend/`) — on this machine always prefix `
 - `UV_DEFAULT_INDEX=https://pypi.org/simple/ uv sync` — install dependencies; `cp .env.example .env` — then set LLM keys and `JWT_SECRET_KEY`.
 - `docker compose up -d` — MySQL + Redis; migrations auto-run on first boot.
 - `uv run uvicorn app.main:app --reload --port 5001` — run the API (`/docs` for Swagger).
-- `uv run ruff check .` and `uv run pytest -q` — lint + tests (69 tests today; keep the suite green).
+- `uv run ruff check .` and `uv run pytest -q` — lint + tests (98 tests today; keep the suite green).
 
 Frontend (`pnpm` 10, from `frontend/`):
 
@@ -56,7 +56,7 @@ One working feature = one commit (or a short series of green commits). If you ar
 
 ## Testing Guidelines
 
-Backend: `uv run pytest -q` (69 tests; `tests/conftest.py` freezes MySQL/Redis/LLM to mocks/dead ports, no external deps needed) + `uv run ruff check .`. Cover new endpoints, tools, and auth/session logic with tests in the matching `backend/tests/test_*.py`; reuse the existing fixtures instead of reaching for real services. CI (`.github/workflows/ci.yml`) runs `ruff check` + `pytest` for the backend and `biome check` for the frontend (the frontend job does **not** run `pnpm build`, so build locally before committing), and rejects mirror URLs in `uv.lock` (regenerate with `UV_DEFAULT_INDEX=https://pypi.org/simple/ uv lock`). Frontend has no test runner — verify with `pnpm lint` + `pnpm build`, then run both apps and exercise the chat flow — try "现在几点了" to test the tool-call loop (and the tool-chain thought-chain UI) in mock mode. Check the active model via `provider` on `GET /api/health`.
+Backend: `uv run pytest -q` (98 tests; `tests/conftest.py` freezes MySQL/Redis/LLM to mocks/dead ports, no external deps needed) + `uv run ruff check .`. Cover new endpoints, tools, and auth/session logic with tests in the matching `backend/tests/test_*.py`; reuse the existing fixtures instead of reaching for real services. CI (`.github/workflows/ci.yml`) runs `ruff check` + `pytest` for the backend and `biome check` for the frontend (the frontend job does **not** run `pnpm build`, so build locally before committing), and rejects mirror URLs in `uv.lock` (regenerate with `UV_DEFAULT_INDEX=https://pypi.org/simple/ uv lock`). Frontend has no test runner — verify with `pnpm lint` + `pnpm build`, then run both apps and exercise the chat flow — try "现在几点了" to test the tool-call loop (and the tool-chain thought-chain UI) in mock mode. Check the active model via `provider` on `GET /api/health`.
 
 ## Commit & Pull Request Guidelines
 

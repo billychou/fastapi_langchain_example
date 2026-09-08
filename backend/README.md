@@ -107,6 +107,7 @@ uv run uvicorn app.main:app --reload --port 5001
 | POST | /api/v1/auth/password/change | 改密(全端下线) | Access |
 | POST | /api/v1/auth/sms/send | 发送验证码 | 匿名(限流) |
 | GET | /api/v1/account/me | 当前资料(PII 脱敏) | Access |
+| PATCH | /api/v1/account/profile | 更新个人资料(昵称/头像 URL) | Access |
 | GET | /api/v1/account/sessions | 在线会话列表 | Access |
 | DELETE | /api/v1/account/sessions/{sid} | 下线指定设备 | Access |
 | GET | /api/v1/admin/accounts | 账号分页列表 | account:read |

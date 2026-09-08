@@ -103,7 +103,7 @@ Hardening (all tunable via env):
 
 ### User & auth (`/api/v1`)
 
-`POST /api/v1/auth/register` · `POST /api/v1/auth/login` (dual-token) · `POST /api/v1/auth/refresh` (rotation + reuse detection) · `POST /api/v1/auth/logout` · `GET /api/v1/account/me` · `GET /api/v1/admin/accounts` · `POST /api/v1/admin/accounts/{uuid}/roles` — see `backend/README.md` for the full table and `backend/docs/architecture.md` for sequence diagrams. Responses use a `{code, message, data}` envelope.
+`POST /api/v1/auth/register` · `POST /api/v1/auth/login` (dual-token) · `POST /api/v1/auth/refresh` (rotation + reuse detection) · `POST /api/v1/auth/logout` · `GET /api/v1/account/me` · `PATCH /api/v1/account/profile` · `GET /api/v1/admin/accounts` · `POST /api/v1/admin/accounts/{uuid}/roles` — see `backend/README.md` for the full table and `backend/docs/architecture.md` for sequence diagrams. Responses use a `{code, message, data}` envelope.
 
 ## Architecture notes
 
