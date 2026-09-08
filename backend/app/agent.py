@@ -1,4 +1,4 @@
-"""Agent construction: chat model + LangChain agent + conversation memory.
+"""Agent construction: chat model + LangChain agent + skills + conversation memory.
 
 会话记忆(LangGraph checkpointer)支持两种后端, 由 CHECKPOINT_BACKEND 切换:
 
@@ -26,6 +26,9 @@ from psycopg import AsyncConnection
 from psycopg.rows import dict_row
 
 from app.config import Settings, get_settings
+from app.context import ChatContext
+from app.middleware.agent_skills import SkillMiddleware
+from app.skills.tools import SKILL_TOOLS
 from app.tools import ALL_TOOLS
 
 logger = logging.getLogger("agent")
@@ -81,10 +84,17 @@ async def init_checkpointer() -> Checkpointer:
 
 
 async def close_checkpointer() -> None:
-    """Close the underlying checkpointer connection if it was opened."""
-    global _checkpointer, _checkpointer_conn
+    """Close the underlying checkpointer connection if it was opened.
+
+    同时丢弃缓存的 agent 单例: agent 构造时就绑定了这个 checkpointer, 连接关掉后它已不可用;
+    而且 AsyncSqliteSaver/AsyncPostgresSaver 内部的 asyncio 原语会绑定首次使用它们的事件循环,
+    进程重启(或测试里换一个事件循环)后继续复用会抛
+    "RuntimeError: ... is bound to a different event loop"。下次 get_agent() 会重建。
+    """
+    global _checkpointer, _checkpointer_conn, _agent
     saver, conn = _checkpointer, _checkpointer_conn
     _checkpointer, _checkpointer_conn = None, None
+    _agent = None
     if saver is not None and conn is not None:
         await conn.close()
         logger.info("Agent checkpointer closed")
@@ -102,9 +112,22 @@ _MOCK_REPLIES = [
     "不过你仍然可以试试：\n"
     "- 「现在几点了」—— 演示工具调用\n"
     "- 「北京天气怎么样」—— 演示天气工具\n"
-    "- 「计算 12 * (3 + 4)」—— 演示计算器工具",
+    "- 「计算 12 * (3 + 4)」—— 演示计算器工具\n"
+    "- 「你有什么技能」—— 演示技能(skills)加载",
     "这是一条 mock 回复：前端与后端的流式链路已经打通。配置真实模型后，这里将是大模型的回答。",
 ]
+
+
+def _demo_skill_name() -> str | None:
+    """取一个匿名可见的内置技能名, 用于 mock 模式演示技能加载链路。"""
+    from app.skills import get_skill_registry
+
+    try:
+        registry = get_skill_registry()
+    except Exception:  # noqa: BLE001 - 技能子系统异常不应影响 mock 聊天
+        return None
+    public = [s.name for s in registry.all() if s.visibility == "public"]
+    return public[0] if public else None
 
 
 def _extract_tool_call(messages: list[BaseMessage]) -> AIMessage | None:
@@ -112,6 +135,20 @@ def _extract_tool_call(messages: list[BaseMessage]) -> AIMessage | None:
     if last_human is None:
         return None
     text = str(last_human.content)
+    if any(k in text for k in ("技能", "skill", "会做什么")):
+        skill_name = _demo_skill_name()
+        if skill_name is not None:
+            return AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "load_skill",
+                        "args": {"name": skill_name},
+                        "id": "mock_call_skill",
+                        "type": "tool_call",
+                    }
+                ],
+            )
     if any(k in text for k in ("时间", "几点", "日期")):
         return AIMessage(
             content="",
@@ -282,15 +319,27 @@ async def get_agent() -> Any:
                 settings = get_settings()
                 model = _resolve_model(settings)
                 checkpointer = await init_checkpointer()
+                skill_middleware = SkillMiddleware()
                 _agent = create_agent(
                     model=model,
-                    tools=ALL_TOOLS,
+                    # 技能工具必须在此全量注册: LangChain 1.x 不允许 middleware 运行时新增未注册工具,
+                    # 只能按请求过滤成子集(见 SkillMiddleware.awrap_model_call)。
+                    tools=[*ALL_TOOLS, *SKILL_TOOLS],
                     system_prompt=settings.system_prompt,
+                    middleware=[skill_middleware],
+                    # 单例 agent 的按用户差异化(可见技能/权限)只能经 context 传入, 见 app/context.py
+                    context_schema=ChatContext,
                     checkpointer=checkpointer,
                 )
+                visible_skills = len(skill_middleware.registry.all())
                 logger.info(
-                    "Agent ready (provider=%s, model=%s)", settings.llm_provider, settings.llm_model
+                    "Agent ready (provider=%s, model=%s, skills=%d)",
+                    settings.llm_provider,
+                    settings.llm_model,
+                    visible_skills,
                 )
+                for error in skill_middleware.registry.errors:
+                    logger.warning("技能加载失败: %s", error)
     return _agent
 
 

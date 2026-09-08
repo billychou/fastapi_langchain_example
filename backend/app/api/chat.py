@@ -26,6 +26,7 @@ from redis.exceptions import RedisError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent import get_agent
+from app.context import ChatContext
 from app.core.net import resolve_client_ip
 from app.core.ratelimit import enforce_chat_rate
 from app.db.redis import get_redis_client
@@ -190,9 +191,18 @@ async def chat_events(
     元数据写入失败不影响 SSE 输出。
 
     thread_id 由路由层决定: 登录用会话 ID; 匿名未显式指定时为每请求随机值。
+
+    技能(skills): 调用者身份经 ChatContext 传入 agent, SkillMiddleware 据此把可见技能
+    目录写进系统提示, 并对无权限的技能调用做服务端拦截。
     """
     agent = await get_agent()
     config = {"configurable": {"thread_id": thread_id}}
+    # agent 是进程级单例, 身份/权限只能按请求经 context 传入(技能可见性据此过滤)
+    context = ChatContext(
+        account_id=ctx.account_id if ctx is not None else 0,
+        authenticated=ctx is not None,
+        permissions=frozenset(ctx.permissions) if ctx is not None else frozenset(),
+    )
 
     first_user_text = next((m.content for m in reversed(request.messages) if m.role == "user"), "")
     assistant_parts: list[str] = []
@@ -203,6 +213,7 @@ async def chat_events(
         async for mode, chunk in agent.astream(
             {"messages": _to_langchain_messages(request.messages)},
             config=config,
+            context=context,
             stream_mode=["messages", "updates"],
         ):
             if mode == "messages":

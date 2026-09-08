@@ -38,11 +38,14 @@ services:
       retries: 20
 
   postgres:
-    image: postgres:16-alpine
+    image: postgres:18.6-alpine
     environment:
       POSTGRES_USER: langgraph
       POSTGRES_PASSWORD: langgraph_dev_only
       POSTGRES_DB: langgraph
+      # PG18+ 镜像默认数据目录改为版本相关路径(/var/lib/postgresql/18/docker),
+      # 显式固定数据目录, 避免跨大版本升级时挂载点与数据目录不一致
+      PGDATA: /var/lib/postgresql/data
     ports:
       - "5432:5432"
     volumes:

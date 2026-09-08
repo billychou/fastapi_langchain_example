@@ -101,6 +101,7 @@ class JwtPermissionMiddleware(BaseHTTPMiddleware):
     ROUTE_PERMISSIONS: dict[str, str] = {
         "GET /api/v1/admin/accounts": "account:read",
         "POST /api/v1/admin/accounts/*/roles": "rbac:assign",
+        "POST /api/v1/skills/reload": "skill:admin",
     }
 
     def __init__(self, app, *, enabled: bool = False) -> None:  # noqa: ANN001
