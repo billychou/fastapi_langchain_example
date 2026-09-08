@@ -137,7 +137,13 @@ const SettingsPage: React.FC = () => {
   }
 
   const saveProfile = async () => {
-    const values = await profileForm.validateFields();
+    // 校验不通过时 antd 已在表单项就地提示; 吞掉 rejection 以免产生 unhandled promise
+    let values: { nickname: string; avatar_url?: string };
+    try {
+      values = await profileForm.validateFields();
+    } catch {
+      return;
+    }
     setSavingProfile(true);
     try {
       await authApi.updateProfile({
@@ -154,7 +160,16 @@ const SettingsPage: React.FC = () => {
   };
 
   const changePassword = async () => {
-    const values = await pwdForm.validateFields();
+    let values: {
+      old_password: string;
+      new_password: string;
+      confirm_password: string;
+    };
+    try {
+      values = await pwdForm.validateFields();
+    } catch {
+      return;
+    }
     setChangingPwd(true);
     try {
       await authApi.changePassword(values.old_password, values.new_password);
