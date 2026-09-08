@@ -7,6 +7,10 @@ FastAPI 一体化后端：LangChain Agent 聊天（SSE）+ 企业级用户与认
 - **聊天**：`POST /api/chat` SSE 流式对话（默认要求登录，`CHAT_REQUIRE_AUTH` 控制），
   兼容 OpenAI 风格 `choices[].delta` 协议，并通过顶层 `agent` 字段扩展
   工具链事件（`tool_call`/`tool_result`），前端据此渲染思维链
+- **Agent 技能(skills)**：`backend/skills/<name>/SKILL.md` 即一个技能(声明式 frontmatter + 说明书正文 + 可选附件)，
+  三级渐进披露(目录常驻系统提示 → `load_skill` 取正文 → `read_skill_file` 取附件)，
+  可见性复用 RBAC(`public`/`auth`/`permission`)，磁盘 mtime 指纹热加载(加技能不用重启)，
+  详见 `docs/skills-design.md`
 - **多身份账号**：account / auth_credential / user_profile 三表解耦，
   单账号可绑定手机号 / 邮箱 / 用户名 / 微信(OAuth2)
 - **双 Token 无感续期**：Access(15min) + Refresh(30d, Redis 会话绑定)，
@@ -49,19 +53,23 @@ FastAPI 一体化后端：LangChain Agent 聊天（SSE）+ 企业级用户与认
 backend/
 ├── app/
 │   ├── main.py          # 应用工厂: 聊天 + 认证路由 + 中间件/异常信封
-│   ├── agent.py         # LangChain Agent
+│   ├── agent.py         # LangChain Agent(单例: 工具全量注册 + SkillMiddleware + ChatContext)
+│   ├── context.py       # ChatContext: 按请求传入的身份/权限(单例 agent 差异化唯一通道)
+│   ├── skills/          # 技能子系统: schema/loader/security/registry/tools
 │   ├── config.py        # 统一配置(LLM + 认证)
 │   ├── deps.py          # get_current / require_permissions
 │   ├── db/              # 异步引擎 / Redis 客户端
 │   ├── models/          # account / credential / rbac / audit
 │   ├── core/            # Argon2id / JWT / AES-GCM+盲索引 / 令牌桶
 │   ├── services/        # auth / 会话仓库 / RBAC / 审计
-│   ├── middleware/      # RequestId / 安全头 / 全局RBAC(演示)
-│   ├── api/v1/          # auth / account / admin 路由
+│   ├── middleware/      # RequestId / 安全头 / 全局RBAC(演示) / agent_skills(技能目录注入+工具收敛)
+│   ├── api/v1/          # auth / account / admin / skills 路由
 │   └── schemas/         # chat / auth / 统一信封
+├── skills/              # 技能内容(数据而非代码): trip-planner(公开) / expense-report(权限门禁)
 ├── migrations/          # 初始建库: MySQL DDL + RBAC 种子 + alembic 版本标记
 ├── alembic/             # 模式迁移的唯一事实来源(增量变更走这里)
 ├── docs/architecture.md # 架构图 + 双 Token 时序图
+├── docs/skills-design.md # 技能子系统设计(渐进披露/RBAC/安全边界/如何加技能)
 └── docker-compose.yml   # 本地 MySQL 8.0 + Redis 7
 ```
 
@@ -100,6 +108,10 @@ uv run uvicorn app.main:app --reload --port 5001
 | PATCH | /api/v1/threads/{thread_id} | 重命名会话 | Access Token |
 | DELETE | /api/v1/threads/{thread_id} | 删除会话(含 checkpoint 清理) | Access Token |
 | GET | /api/v1/threads/{thread_id}/messages | 会话历史消息(checkpoint) | Access Token |
+| GET | /api/v1/skills | 当前账号可见的技能目录(`?scope=all` 看全量) | Access Token(`all` 需 skill:admin) |
+| GET | /api/v1/skills/{name} | 技能详情(body 与 `load_skill` 交给模型的内容一致) | Access Token(按可见性) |
+| GET | /api/v1/skills/{name}/files/{path} | 技能附件文本(路径穿越/软链接一律 404) | Access Token(按可见性) |
+| POST | /api/v1/skills/reload | 强制热重载技能目录(返回加载失败原因) | skill:admin |
 | POST | /api/v1/auth/register | 注册(手机号/邮箱+密码) | 匿名(限流) |
 | POST | /api/v1/auth/login | 登录, 返回双 Token | 匿名(限流+锁定) |
 | POST | /api/v1/auth/refresh | 无感续期(轮换+重放检测) | Refresh Token |
@@ -107,8 +119,10 @@ uv run uvicorn app.main:app --reload --port 5001
 | POST | /api/v1/auth/password/change | 改密(全端下线) | Access |
 | POST | /api/v1/auth/sms/send | 发送验证码 | 匿名(限流) |
 | GET | /api/v1/account/me | 当前资料(PII 脱敏) | Access |
+| PATCH | /api/v1/account/profile | 更新个人资料(昵称/头像 URL) | Access |
 | GET | /api/v1/account/sessions | 在线会话列表 | Access |
 | DELETE | /api/v1/account/sessions/{sid} | 下线指定设备 | Access |
+| PUT | /api/v1/account/login-policy | 切换登录策略(JSON body: `policy`) | Access |
 | GET | /api/v1/admin/accounts | 账号分页列表 | account:read |
 | GET | /api/v1/admin/roles | 角色列表 | rbac:read |
 | POST | /api/v1/admin/accounts/{uuid}/roles | 全量分配角色 | rbac:assign |

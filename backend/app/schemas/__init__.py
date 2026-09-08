@@ -1,4 +1,4 @@
-"""请求/响应模型包: chat(聊天) + auth(认证) + common(统一信封)。"""
+"""请求/响应模型包: chat(聊天) + auth(认证) + skills(技能) + common(统一信封)。"""
 from app.schemas.auth import (
     AccountInfo,
     ChangePasswordRequest,
@@ -10,9 +10,12 @@ from app.schemas.auth import (
     SessionInfo,
     SmsSendRequest,
     TokenPairResponse,
+    UpdateLoginPolicyRequest,
+    UpdateProfileRequest,
 )
 from app.schemas.chat import ChatRequest, MessageType
 from app.schemas.common import ok
+from app.schemas.skills import SkillDetail, SkillFile, SkillReloadResult, SkillSummary
 from app.schemas.threads import (
     CreateThreadRequest,
     ThreadItem,
@@ -33,9 +36,15 @@ __all__ = [
     "OAuthCallbackRequest",
     "TokenPairResponse",
     "AccountInfo",
+    "UpdateProfileRequest",
+    "UpdateLoginPolicyRequest",
     "SessionInfo",
     "ThreadItem",
     "CreateThreadRequest",
     "UpdateThreadRequest",
     "ThreadMessage",
+    "SkillSummary",
+    "SkillDetail",
+    "SkillFile",
+    "SkillReloadResult",
 ]

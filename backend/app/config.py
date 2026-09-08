@@ -59,6 +59,16 @@ class Settings(BaseSettings):
         ""  # postgres 后端必填, 如 postgres://user:pass@host:5432/langgraph
     )
 
+    # ================= Agent 技能(Skills) =================
+    # 技能 = skills_dir 下的一个目录: SKILL.md(frontmatter + 正文) + 可选参考文件。
+    # 采用三级渐进披露: 目录(name+description)常驻系统提示 → load_skill 取正文 → read_skill_file 取附件。
+    skills_enabled: bool = True
+    skills_dir: str = "./skills"  # 相对 backend/ 运行目录; 建议配绝对路径
+    skill_max_catalog_chars: int = 2000  # L1 目录注入系统提示的字符上限
+    skill_max_body_chars: int = 8000  # L2 SKILL.md 正文返回给模型的上限
+    skill_max_file_bytes: int = 256 * 1024  # L3 read_skill_file 单文件字节上限
+    skill_max_files_per_skill: int = 100  # 单个技能可索引的附件数量上限
+
     # ================= 聊天接口保护 =================
     chat_max_messages: int = 100  # 单次请求消息条数上限
     chat_max_message_chars: int = 32_000  # 单条消息字符数上限

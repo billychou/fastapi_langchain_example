@@ -7,6 +7,7 @@ export const API_BASE =
 
 const ACCESS_KEY = 'auth.accessToken';
 const REFRESH_KEY = 'auth.refreshToken';
+const DEVICE_KEY = 'auth.deviceId';
 
 // ---------------- 类型 ----------------
 export interface ApiEnvelope<T> {
@@ -30,7 +31,27 @@ export interface AccountInfo {
   phone_masked?: string | null;
   email_masked?: string | null;
   roles: string[];
+  login_policy?: string;
 }
+
+export interface SessionInfo {
+  session_id: string;
+  device_id?: string | null;
+  ip?: string | null;
+  user_agent?: string | null;
+  created_at?: string | null;
+  last_seen?: string | null;
+  /** 是否为当前浏览器会话(后端按 sid 比对得出) */
+  current: boolean;
+}
+
+export interface UpdateProfileParams {
+  /** undefined/null=不修改; 空串仅对 avatar_url 有意义(清空头像) */
+  nickname?: string | null;
+  avatar_url?: string | null;
+}
+
+export type LoginPolicy = 'multi_device' | 'single_device';
 
 export interface AdminAccountItem {
   account_uuid: string;
@@ -72,6 +93,23 @@ export function getRefreshToken(): string | null {
 export function setTokens(pair: TokenPair): void {
   window.localStorage.setItem(ACCESS_KEY, pair.access_token);
   window.localStorage.setItem(REFRESH_KEY, pair.refresh_token);
+}
+
+/**
+ * 稳定的浏览器设备标识: 首次生成后写入 localStorage, 登录时随请求上报,
+ * 用于「设备管理」里区分同一账号的多个在线会话。
+ */
+export function getDeviceId(): string {
+  if (typeof window === 'undefined') return '';
+  const existing = window.localStorage.getItem(DEVICE_KEY);
+  if (existing) return existing;
+  const rand =
+    typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  const id = `web-${rand}`.slice(0, 128);
+  window.localStorage.setItem(DEVICE_KEY, id);
+  return id;
 }
 
 export function clearTokens(): void {
@@ -207,6 +245,30 @@ export const authApi = {
       body: JSON.stringify({ all_devices }),
     }),
   me: () => request<AccountInfo>('/api/v1/account/me', { method: 'GET' }),
+  updateProfile: (params: UpdateProfileParams) =>
+    request<AccountInfo>('/api/v1/account/profile', {
+      method: 'PATCH',
+      body: JSON.stringify(params),
+    }),
+  updateLoginPolicy: (policy: LoginPolicy) =>
+    request<{ login_policy: string; kicked_sessions: number }>(
+      '/api/v1/account/login-policy',
+      { method: 'PUT', body: JSON.stringify({ policy }) },
+    ),
+  listSessions: () =>
+    request<SessionInfo[]>('/api/v1/account/sessions', { method: 'GET' }),
+  kickSession: (sessionId: string) =>
+    request<{ session_id: string }>(`/api/v1/account/sessions/${sessionId}`, {
+      method: 'DELETE',
+    }),
+  changePassword: (oldPassword: string, newPassword: string) =>
+    request<{ message: string }>('/api/v1/auth/password/change', {
+      method: 'POST',
+      body: JSON.stringify({
+        old_password: oldPassword,
+        new_password: newPassword,
+      }),
+    }),
 
   // 管理端
   listAccounts: (page: number, pageSize: number) =>
