@@ -44,8 +44,20 @@ import { useAuth } from '@/lib/auth-context';
 
 const { Title, Text } = Typography;
 
-const fmtTime = (v?: string | null) =>
-  v ? v.replace('T', ' ').slice(0, 19) : '—';
+const pad = (n: number) => String(n).padStart(2, '0');
+
+/** 会话时间戳: 后端给的是 epoch 秒字符串, 这里同时兼容 ISO 字符串。 */
+const fmtTime = (v?: string | null) => {
+  if (!v) return '—';
+  const digits = /^\d{9,13}$/.test(v) ? Number(v) : Number.NaN;
+  const date = Number.isNaN(digits)
+    ? new Date(v)
+    : new Date(digits * (digits > 1e11 ? 1 : 1000));
+  if (Number.isNaN(date.getTime())) return v;
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(
+    date.getHours(),
+  )}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+};
 
 /** 与后端 security.assert_password_strength 保持一致的前端预校验。 */
 const passwordStrengthError = (value: string): string | null => {
