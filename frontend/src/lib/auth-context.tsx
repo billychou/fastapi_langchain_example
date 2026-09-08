@@ -16,6 +16,7 @@ import {
   authApi,
   clearTokens,
   getAccessToken,
+  getDeviceId,
   type LoginParams,
   type RegisterParams,
   setTokens,
@@ -60,7 +61,8 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({
   }, []);
 
   const login = useCallback(async (params: LoginParams) => {
-    const data = await authApi.login(params);
+    // 带上稳定的设备标识, 便于「个人设置 → 设备管理」区分多端会话
+    const data = await authApi.login({ device_id: getDeviceId(), ...params });
     setTokens(data);
     setUser(await authApi.me());
   }, []);
@@ -74,6 +76,7 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({
         identity_type: rest.identity_type,
         identifier: rest.identifier,
         password: rest.password,
+        device_id: getDeviceId(),
       });
       setTokens(data);
       setUser(await authApi.me());
