@@ -10,6 +10,7 @@ import {
   LogoutOutlined,
   PaperClipOutlined,
   QuestionCircleOutlined,
+  SettingOutlined,
   ShareAltOutlined,
   SyncOutlined,
   TeamOutlined,
@@ -640,6 +641,11 @@ const Independent: React.FC = () => {
           trigger={['click']}
           menu={{
             items: [
+              {
+                key: 'settings',
+                icon: <SettingOutlined />,
+                label: <Link href="/settings">个人设置</Link>,
+              },
               ...(isAdmin
                 ? [
                     {
@@ -664,7 +670,9 @@ const Independent: React.FC = () => {
           }}
         >
           <Space style={{ cursor: 'pointer' }}>
-            <Avatar size={24}>{user?.nickname?.slice(0, 1) || 'U'}</Avatar>
+            <Avatar size={24} src={user?.avatar_url || undefined}>
+              {user?.nickname?.slice(0, 1) || 'U'}
+            </Avatar>
             <span style={{ fontSize: 12 }}>{user?.nickname || '用户'}</span>
           </Space>
         </Dropdown>

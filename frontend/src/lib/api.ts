@@ -30,7 +30,27 @@ export interface AccountInfo {
   phone_masked?: string | null;
   email_masked?: string | null;
   roles: string[];
+  login_policy?: string;
 }
+
+export interface SessionInfo {
+  session_id: string;
+  device_id?: string | null;
+  ip?: string | null;
+  user_agent?: string | null;
+  created_at?: string | null;
+  last_seen?: string | null;
+  /** 是否为当前浏览器会话(后端按 sid 比对得出) */
+  current: boolean;
+}
+
+export interface UpdateProfileParams {
+  /** undefined/null=不修改; 空串仅对 avatar_url 有意义(清空头像) */
+  nickname?: string | null;
+  avatar_url?: string | null;
+}
+
+export type LoginPolicy = 'multi_device' | 'single_device';
 
 export interface AdminAccountItem {
   account_uuid: string;
@@ -207,6 +227,30 @@ export const authApi = {
       body: JSON.stringify({ all_devices }),
     }),
   me: () => request<AccountInfo>('/api/v1/account/me', { method: 'GET' }),
+  updateProfile: (params: UpdateProfileParams) =>
+    request<AccountInfo>('/api/v1/account/profile', {
+      method: 'PATCH',
+      body: JSON.stringify(params),
+    }),
+  updateLoginPolicy: (policy: LoginPolicy) =>
+    request<{ login_policy: string; kicked_sessions: number }>(
+      '/api/v1/account/login-policy',
+      { method: 'PUT', body: JSON.stringify({ policy }) },
+    ),
+  listSessions: () =>
+    request<SessionInfo[]>('/api/v1/account/sessions', { method: 'GET' }),
+  kickSession: (sessionId: string) =>
+    request<{ session_id: string }>(`/api/v1/account/sessions/${sessionId}`, {
+      method: 'DELETE',
+    }),
+  changePassword: (oldPassword: string, newPassword: string) =>
+    request<{ message: string }>('/api/v1/auth/password/change', {
+      method: 'POST',
+      body: JSON.stringify({
+        old_password: oldPassword,
+        new_password: newPassword,
+      }),
+    }),
 
   // 管理端
   listAccounts: (page: number, pageSize: number) =>
