@@ -133,3 +133,35 @@ def test_chat_error_envelope_never_leaks_internals(client):
     """未知路由走统一信封, 不暴露堆栈。"""
     response = client.get("/api/no-such-route")
     assert response.status_code == 404
+
+
+def _learn_events(text: str) -> list[dict]:
+    events: list[dict] = []
+    for line in text.splitlines():
+        if not line.startswith("data: ") or line == "data: [DONE]":
+            continue
+        payload = json.loads(line[len("data: ") :])
+        if payload.get("learn"):
+            events.append(payload["learn"])
+    return events
+
+
+def test_anonymous_chat_emits_no_learn_events(client):
+    """匿名请求即使用学习口吻, 也不下发任何 learn 事件(教学内核按登录态启用)。
+
+    这是「未登录行为与注入前逐字一致」的可断言形式: `ctx is None` 时
+    `_prepare_pedagogy` 直接返回 None, `pedagogy_sink` 不进 context,
+    中间件的两个钩子都原样放行(见 app/api/chat.py、app/middleware/agent_pedagogy.py)。
+    """
+    response = client.post(
+        "/api/chat",
+        json={
+            "messages": [{"role": "user", "content": "我想搞懂闭包"}],
+            "conversation_id": "smoke-anon-pedagogy",
+        },
+    )
+    assert response.status_code == 200
+    assert response.text.rstrip().endswith("data: [DONE]")
+    assert _learn_events(response.text) == []
+    # 文本仍然正常流出, 没有因为「不是教学回合」被护栏改写
+    assert "".join(_deltas(response.text))

@@ -128,11 +128,17 @@ _agent = create_agent(
     model=model,
     tools=[*ALL_TOOLS, *SKILL_TOOLS],   # 技能工具必须在此全量注册
     system_prompt=settings.system_prompt,
-    middleware=[SkillMiddleware()],     # 请求级过滤 + 目录注入
-    context_schema=ChatContext,         # 身份经此传入
+    middleware=[SkillMiddleware(), PedagogyMiddleware()],  # 请求级过滤 + 目录注入; 教学状态注入 + 护栏
+    context_schema=ChatContext,         # 身份与教学状态经此传入
     checkpointer=checkpointer,
 )
 ```
+
+> 中间件**顺序有意义**：`SkillMiddleware` 先把可见技能目录追加到 system prompt，
+> `PedagogyMiddleware` 再追加 `pedagogy_state` 块，于是模型读到的是
+> 「基线 → 我会什么 → 我现在在哪一步」。`PedagogyMiddleware` 还通过 `state_schema`
+> 给图状态声明了 `pedagogy` 频道（费曼循环的跨轮载体），所以它必须出现在这个列表里 ——
+> 频道是构造期声明的。教学回合的装配见 `docs/pedagogy-core.md` §6 落地状态。
 
 两条 LangChain 1.x 的硬约束决定了这个形状：
 

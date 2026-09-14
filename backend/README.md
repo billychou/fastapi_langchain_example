@@ -53,8 +53,10 @@ FastAPI 一体化后端：LangChain Agent 聊天（SSE）+ 企业级用户与认
 backend/
 ├── app/
 │   ├── main.py          # 应用工厂: 聊天 + 认证路由 + 中间件/异常信封
-│   ├── agent.py         # LangChain Agent(单例: 工具全量注册 + SkillMiddleware + ChatContext)
-│   ├── context.py       # ChatContext: 按请求传入的身份/权限(单例 agent 差异化唯一通道)
+│   ├── agent.py         # LangChain Agent(单例: 工具全量注册 + Skill/Pedagogy 中间件 + ChatContext)
+│   ├── context.py       # ChatContext: 按请求传入的身份/权限/教学状态(单例 agent 差异化唯一通道)
+│   ├── pedagogy/        # 教学法内核(纯函数, 不碰库): states/loop/schemas/gaps/mastery/policy
+│   │                    #   + turn(判读学习者发言)/session(装配回合)/events(learn SSE + 跨轮载体)/persona
 │   ├── skills/          # 技能子系统: schema/loader/security/registry/tools
 │   ├── config.py        # 统一配置(LLM + 认证)
 │   ├── deps.py          # get_current / require_permissions
@@ -63,6 +65,7 @@ backend/
 │   ├── core/            # Argon2id / JWT / AES-GCM+盲索引 / 令牌桶
 │   ├── services/        # auth / 会话仓库 / RBAC / 审计
 │   ├── middleware/      # RequestId / 安全头 / 全局RBAC(演示) / agent_skills(技能目录注入+工具收敛)
+│   │                    #   / agent_pedagogy(教学状态注入 + 护栏执行 + pedagogy 频道写回)
 │   ├── api/v1/          # auth / account / admin / skills 路由
 │   └── schemas/         # chat / auth / 统一信封
 ├── skills/              # 技能内容(数据而非代码): trip-planner(公开) / expense-report(权限门禁)

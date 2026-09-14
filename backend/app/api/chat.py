@@ -26,12 +26,17 @@ from redis.exceptions import RedisError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent import get_agent
+from app.config import get_settings
 from app.context import ChatContext
+from app.core.messages import message_text
 from app.core.net import resolve_client_ip
 from app.core.ratelimit import enforce_chat_rate
 from app.db.redis import get_redis_client
 from app.db.session import get_db
 from app.deps import AuthContext, get_current_optional
+from app.middleware.agent_pedagogy import STATE_CHANNEL
+from app.pedagogy.events import LearnEvent
+from app.pedagogy.session import PedagogyTurn, prepare_turn
 from app.schemas import ChatRequest, MessageType
 from app.schemas.chat import DEFAULT_CONVERSATION_ID
 from app.services import thread_service
@@ -45,19 +50,23 @@ def sse(payload: dict[str, Any]) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
+def learn_sse(event: LearnEvent) -> str:
+    """一条 ``learn`` 事件(学习证据面板的数据源)。
+
+    与既有 ``agent`` 事件同构: 顶层平铺一个字段 + 一个空的 ``choices[].delta``,
+    因此只读 ``delta.content`` 的老客户端(包括 ``@ant-design/x-sdk`` 的默认 provider)
+    会**自动忽略**它, 不需要版本协商。
+    """
+    return sse({"choices": [{"delta": {}}], "learn": event.to_sse()})
+
+
 def _chunk_text(content: Any) -> str:
-    """Normalize message content (str or list of content blocks) to text."""
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts = []
-        for block in content:
-            if isinstance(block, str):
-                parts.append(block)
-            elif isinstance(block, dict) and block.get("type") == "text":
-                parts.append(block.get("text", ""))
-        return "".join(parts)
-    return ""
+    """Normalize message content (str or list of content blocks) to text.
+
+    实现在 :mod:`app.core.messages`(教学中间件也要按同一口径数字数), 这里保留别名
+    以免改动本文件里三处调用点。
+    """
+    return message_text(content)
 
 
 # 工具结果回传前端时的最大字符数: 结果仅用于思维链展示, 超长截断防止 SSE 膨胀
@@ -194,18 +203,42 @@ async def chat_events(
 
     技能(skills): 调用者身份经 ChatContext 传入 agent, SkillMiddleware 据此把可见技能
     目录写进系统提示, 并对无权限的技能调用做服务端拦截。
+
+    学习证据(learn): 登录态 + `PEDAGOGY_ENABLED` 打开 + 本轮是学习会话时, 流里会多一个
+    顶层 `learn` 字段 —— `{"choices": [{"delta": {}}], "learn": {"type": "state"|"gap"|
+    "guard"|"attachment"|"note", "state": ..., "loop_index": ..., "data": {...}}}`。
+    `state`/`gap` 在调模型**之前**就下发(路由侧判读学习者发言即可确定), `guard`/
+    `attachment` 在模型说完之后下发。护栏改写发生在流式输出之后, 所以 `guard.data.
+    replacement` 携带改写后的**全文**, 由前端替换气泡内容; 只读 `delta` 的客户端
+    不受任何影响。
     """
     agent = await get_agent()
     config = {"configurable": {"thread_id": thread_id}}
-    # agent 是进程级单例, 身份/权限只能按请求经 context 传入(技能可见性据此过滤)
-    context = ChatContext(
-        account_id=ctx.account_id if ctx is not None else 0,
-        authenticated=ctx is not None,
-        permissions=frozenset(ctx.permissions) if ctx is not None else frozenset(),
-    )
-
     first_user_text = next((m.content for m in reversed(request.messages) if m.role == "user"), "")
+
+    # 教学回合装配: 读 checkpointer 的 pedagogy 频道 -> 判读学习者这句话 -> tick。
+    # 返回 None 就是普通聊天(闲聊/匿名/降级开关关闭), 下面的行为与注入前逐字一致。
+    turn = await _prepare_pedagogy(agent, ctx, thread_id, first_user_text, config)
+
+    # agent 是进程级单例, 身份/权限/教学状态只能按请求经 context 传入
+    identity: dict[str, Any] = {
+        "account_id": ctx.account_id if ctx is not None else 0,
+        "authenticated": ctx is not None,
+        "permissions": frozenset(ctx.permissions) if ctx is not None else frozenset(),
+    }
+    context = ChatContext(**identity, **(turn.context_kwargs if turn else {}))
+    sink = turn.sink if turn is not None else None
+
     assistant_parts: list[str] = []
+    # 护栏改写过的消息会被 after_model 以「同 id 的新消息」再报一次(updates lane 的
+    # 节点名变成 PedagogyMiddleware.after_model), 不去重前端就会看到两次工具调用。
+    seen_events: set[str] = set()
+
+    if turn is not None:
+        # 调模型之前就能确定的事件先走: 学习者应该先看到「现在在哪一步」,
+        # 再看到模型的回复, 而不是等流结束才补一张状态卡。
+        for event in turn.pre_events:
+            yield learn_sse(event)
 
     try:
         # messages 模式输出 LLM token 增量 (chunk, metadata);
@@ -227,7 +260,16 @@ async def chat_events(
                 for node_output in chunk.values():
                     for message in (node_output or {}).get("messages", []):
                         for event in _tool_events(message):
+                            key = f"{event['type']}:{event['id']}:{event['name']}"
+                            if key in seen_events:
+                                continue
+                            seen_events.add(key)
                             yield sse({"choices": [{"delta": {}}], "agent": event})
+            # 中间件在模型说完之后才产出护栏/诊断事件; 每次循环都拉一把,
+            # 它们才能与 token 增量交错下发, 而不是堆在流末尾。
+            if sink is not None:
+                for event in sink.drain():
+                    yield learn_sse(event)
     except Exception:  # noqa: BLE001 - 完整错误仅落服务端日志, 客户端只收脱敏消息
         logger.exception("Agent stream failed")
         request_id = getattr(raw_request.state, "request_id", "-")
@@ -244,8 +286,52 @@ async def chat_events(
         )
     else:
         if ctx is not None:
+            # 这里记的是**流式输出过的原文**: 护栏改写发生在 token 已经出门之后,
+            # 服务端收不回来。checkpointer 里存的是改写后的版本, 前端按
+            # learn.guard.data.replacement 替换气泡(#9)。会话标题/预览只是索引,
+            # 学习证据的权威副本在 learner_explanation / mastery_ledger(#7)。
             await thread_service.record_exchange(
                 db, ctx.account_id, thread_id, first_user_text, "".join(assistant_parts)
             )
 
+    if sink is not None:
+        for event in sink.drain():
+            yield learn_sse(event)
+
     yield "data: [DONE]\n\n"
+
+
+async def _prepare_pedagogy(
+    agent: Any,
+    ctx: AuthContext | None,
+    thread_id: str,
+    text: str,
+    config: dict[str, Any],
+) -> PedagogyTurn | None:
+    """装配本轮教学回合; 任何一步失败都退回普通聊天(``None``)。
+
+    跨轮载体存在 LangGraph checkpointer 的 ``pedagogy`` 频道里(architecture §5 的 L1
+    记忆), 所以这里要 ``aget_state`` 一次。**不新增任何存储**, 也天然按 ``thread_id``
+    隔离; 未知线程返回空快照而不抛异常(LangGraph 的行为)。
+
+    读频道失败一律降级为「本轮不教学」而不是 500: 状态机是可重建的辅助信息,
+    账本在 MySQL, 教学增强不该把聊天本身拖下水。
+    """
+    if ctx is None or not get_settings().pedagogy_enabled:
+        return None
+    try:
+        snapshot = await agent.aget_state(config)
+        raw_channel = (snapshot.values or {}).get(STATE_CHANNEL)
+    except Exception:  # noqa: BLE001 - checkpointer 不可用时聊天仍要可用
+        logger.warning("读取 pedagogy 频道失败, 本轮按普通聊天处理", exc_info=True)
+        return None
+    try:
+        return prepare_turn(
+            raw_channel=raw_channel,
+            thread_id=thread_id,
+            account_id=ctx.account_id,
+            text=text,
+        )
+    except Exception:  # noqa: BLE001 - 同上: 教学装配失败不得影响聊天
+        logger.warning("装配教学回合失败, 本轮按普通聊天处理", exc_info=True)
+        return None

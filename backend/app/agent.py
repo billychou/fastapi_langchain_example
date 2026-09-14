@@ -6,6 +6,10 @@
 - ``postgres``: 连接 ``CHECKPOINT_DATABASE_URL``, 首次启动自动建
   ``checkpoint_*`` 表(LangGraph 官方 checkpointer, 与 LangGraph Platform
   同源)。SQLite 文件无法跨容器共享, 生产/多副本部署应使用 Postgres。
+
+同一个 checkpointer 还顺带承载**教学状态**: ``PedagogyMiddleware`` 通过 ``state_schema``
+给图状态加了一个 ``pedagogy`` 频道(值是 ``LoopCarrier`` 的 JSON), 费曼循环因此跨轮
+存活, 且不需要任何新表/新键/新 TTL(见 ``docs/education-agent-architecture.md`` §5)。
 """
 
 import asyncio
@@ -27,6 +31,7 @@ from psycopg.rows import dict_row
 
 from app.config import Settings, get_settings
 from app.context import ChatContext
+from app.middleware.agent_pedagogy import PedagogyMiddleware
 from app.middleware.agent_skills import SkillMiddleware
 from app.skills.tools import SKILL_TOOLS
 from app.tools import ALL_TOOLS
@@ -326,17 +331,23 @@ async def get_agent() -> Any:
                     # 只能按请求过滤成子集(见 SkillMiddleware.awrap_model_call)。
                     tools=[*ALL_TOOLS, *SKILL_TOOLS],
                     system_prompt=settings.system_prompt,
-                    middleware=[skill_middleware],
-                    # 单例 agent 的按用户差异化(可见技能/权限)只能经 context 传入, 见 app/context.py
+                    # 顺序有意义: SkillMiddleware 先追加技能目录, PedagogyMiddleware 再追加
+                    # 教学状态块, 于是模型读到的系统提示是「基线 -> 我会什么 -> 我现在在哪一步」。
+                    # PedagogyMiddleware 还通过 state_schema 给图状态加了 `pedagogy` 频道
+                    # (跨轮载体), 所以它必须出现在 middleware 列表里 —— 频道是构造期声明的。
+                    middleware=[skill_middleware, PedagogyMiddleware()],
+                    # 单例 agent 的按用户差异化(可见技能/权限/教学状态)只能经 context 传入,
+                    # 见 app/context.py
                     context_schema=ChatContext,
                     checkpointer=checkpointer,
                 )
                 visible_skills = len(skill_middleware.registry.all())
                 logger.info(
-                    "Agent ready (provider=%s, model=%s, skills=%d)",
+                    "Agent ready (provider=%s, model=%s, skills=%d, pedagogy=%s)",
                     settings.llm_provider,
                     settings.llm_model,
                     visible_skills,
+                    settings.pedagogy_enabled,
                 )
                 for error in skill_middleware.registry.errors:
                     logger.warning("技能加载失败: %s", error)

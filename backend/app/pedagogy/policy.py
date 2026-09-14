@@ -191,6 +191,15 @@ def enforce_probe_budget(
     )
 
 
+def remaining_probes(probes_used: int, config: PedagogyConfig) -> int:
+    """本轮还剩几个追问名额。
+
+    单独抽出来是因为**注入给模型的状态块**与**下发给前端的 ``learn.state`` 事件**必须
+    是同一个数: 模型以为还能问 3 个、前端显示还剩 1 个, 学习者看到的就是自相矛盾的界面。
+    """
+    return max(config.max_probes_per_turn - max(probes_used, 0), 0)
+
+
 def enforce_monologue_cap(
     text: str, config: PedagogyConfig
 ) -> tuple[str, str, Violation | None]:

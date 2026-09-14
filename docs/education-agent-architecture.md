@@ -70,7 +70,7 @@ flowchart TB
     end
 
     subgraph Agents["Agent 编排 (LangGraph)"]
-        G1["tutor 子图: 现有 create_agent + PedagogyMiddleware + SkillMiddleware"]
+        G1["tutor 子图: 现有 create_agent + SkillMiddleware + PedagogyMiddleware (P0 #6 已落地)"]
         G2["director 导演图 (P2): 决定谁说话/切场景/交回话筒"]
         G3["persona 子 agent: 小白同学 / 教练 / 抬杠同学 (skills 承载)"]
         G4["generator 子图 (P2): 大纲 → 场景"]
@@ -179,6 +179,25 @@ frontend/src/
 │   └── report/                    # 新增（P3）：家长/教师报告（权限门禁）
 └── src/lib/learning-provider.ts   # 新增：ToolChainChatProvider 的同构扩展，累积 learn 事件
 ```
+
+> **落地状态（P0 #6，已实现）**：`app/pedagogy/` 实际比草案多了四个模块，都是
+> 「把内核接到一次 HTTP 请求上」所必需的，且全部不碰数据库、不发 HTTP：
+>
+> | 文件 | 职责 | 为什么草案里没有 |
+> |---|---|---|
+> | `turn.py` | 请求文本 → 学习者侧事件（确定性正则：概念命名 / 自述达标 / 要求直答） | 草案只画了状态机，没画「谁把用户这句话翻译成事件」 |
+> | `session.py` | 一轮请求 → `PedagogyTurn`（载体 + 转移 + sink + pre-events），纯同步函数 | 路由侧装配点，草案把它含糊地写在 service 层 |
+> | `events.py` | `LearnEvent`（`learn` SSE 形状）/ `PedagogySink`（单请求收集器）/ `LoopCarrier`（跨轮载体） | §7.1 只定义了 JSON，没定义承载它的对象 |
+> | `persona.py` | 状态与卡点 → persona 技能名的推荐映射（`recommend_persona`） | §5 的 persona 表落地成「推荐哪个技能」这一步 |
+>
+> 另外 `app/core/messages.py::message_text()` 是新收拢的公共纯函数：
+> `chat.py`、`thread_service.py`、教学中间件都要按同一口径数「系统说了多少字」，
+> 而 `content` 可能是 content blocks 列表 —— 直接 `len()` 会让 `monologue_cap` 与
+> `learner_talk_ratio` 静默失效。
+>
+> 仍未落地（按计划）：`whychain.py`（P1 #4）、`knowledge/`、`memory/`、`classroom/`、
+> `services/learning_service.py`（P0 #7）、`api/v1/learning.py`（P0 #7）、
+> `evals/`（P0 #10）、前端 `learn/` 与 `learning-provider.ts`（P0 #9）。
 
 **复用优先**：`skills/` 承载教学法（不改代码即可迭代提示词与 SOP）、
 `SkillMiddleware` 的工具收敛机制承载掌握度门控、`agent_threads` + checkpointer 承载 L1 记忆、
@@ -377,6 +396,14 @@ CREATE TABLE classroom_event (         -- 课堂回放与学习证据的来源
 | L2 | 结构化学习者事实（误解、偏好、语言水平、策略） | `learner_fact` | 每次 gap 判定闭合/失败后 | `PedagogyMiddleware` 注入摘要（带 token 预算） |
 | L3 | 综合画像 | `learner_profile` | 异步周期任务（如每 20 次循环或每日） | system 层个性化、报告页 |
 
+> **落地状态（P0 #6，已实现）**：L1 已多出**一个频道**而不是多出一张表 ——
+> `PedagogyMiddleware.state_schema` 给图状态声明了 `pedagogy` 频道（值是 `LoopCarrier`
+> 序列化的 JSON：状态快照 + `awaiting_escape` + `turns`），费曼循环因此跨轮存活，
+> 沿用现有 checkpointer（SQLite/Postgres）与 `thread_id` 隔离，**零新增存储、零新增 TTL**。
+> 频道数据损坏时 `LoopCarrier.from_channel()` 返回 `None`（记一条 warning，本轮从 `Pick`
+> 重新开始）而不是让 `/api/chat` 变 500：状态机是可重建的辅助信息，账本才在 MySQL。
+> L2/L3 仍按计划在 P1 落地。
+
 Memory Graph 的边就是外键：`learner_fact.evidence_explanation_id → L1`，
 `learner_profile.source_fact_ids → L2`。**画像里的每句话都能点回证据** —— 这是对家长/教师可信的前提，
 也是 vision §6「掌握度账本」的落点。
@@ -394,7 +421,7 @@ Memory Graph 的边就是外键：`learner_fact.evidence_explanation_id → L1`�
 ```mermaid
 flowchart TB
     IN["用户消息 / 课堂事件"] --> ROUTE{"路由: 辅导 or 课堂?"}
-    ROUTE -->|辅导| TUTOR["tutor 子图\ncreate_agent + [PedagogyMiddleware, SkillMiddleware]"]
+    ROUTE -->|辅导| TUTOR["tutor 子图\ncreate_agent + [SkillMiddleware, PedagogyMiddleware]"]
     ROUTE -->|课堂 P2| DIRECTOR["director 导演图"]
     DIRECTOR --> TEACHER["teacher agent (苏格拉底)"]
     DIRECTOR --> LISTENER["listener agent (小白同学)"]
@@ -414,6 +441,26 @@ flowchart TB
 3. **裁决权在内核**：LLM 输出必须经 `PolicyEngine` 过滤（截断独白、抑制超额追问、拦截直答）。
    模型不听话时，系统行为仍然正确 —— 这是「控制流而非提示词」的工程含义。
 4. 单例约束不变：所有子图共享一个进程内 agent 构造，差异走 `context`。
+
+> **落地状态（P0 #6，已实现）**：上图只有 `TUTOR` 分支落地了，且它**还不是子图** ——
+> 就是原来那个 `create_agent` 单例，`middleware=[SkillMiddleware(), PedagogyMiddleware()]`
+> （`backend/app/agent.py`）。`director` / `generator` / persona 子 agent 按计划在 P2。
+>
+> 三条实现约束（都由 `backend/tests/test_pedagogy_middleware.py`、
+> `tests/test_pedagogy_session.py`、`tests/test_chat_pedagogy_api.py` 守卫）：
+>
+> 1. **顺序有意义**：`SkillMiddleware` 先追加技能目录，`PedagogyMiddleware` 再追加
+>    `pedagogy_state` 块，模型读到的系统提示是「基线 → 我会什么 → 我现在在哪一步」。
+>    状态块预算 `STATE_BLOCK_MAX_CHARS=1200` 是实现常量，**刻意不进 `PEDAGOGY_*`**
+>    （那张表是教学阈值，会被 `loop-sop.md` 的配置表逐项对账）。
+> 2. **裁决权在内核，护栏跑在流式输出之后**：`aafter_model` 拿到的是聚合完成的整条消息，
+>    而 token 增量早已出门、服务端收不回来。所以策略是「照实改写 + 明确告知」：
+>    改写后的**全文**随 `learn.guard.data.replacement` 下发，由前端替换气泡，
+>    checkpointer 里存的也是改写后的版本（`agent_threads` 预览记的是流式原文，两者刻意允许不同）。
+> 3. **软护栏一次请求只记一次**：`learner_talk_ratio` 属 `LOG` 级，若同时出现在路由侧
+>    pre-events 与中间件 post-model，一次 HTTP 请求就会下发两张同样的卡；
+>    `session._pre_events` 因此过滤掉 `GuardAction.LOG`（硬护栏如 `escape_hatch` 仍在
+>    调模型前下发，`step.violations` 原样保留供将来落库）。
 
 ---
 

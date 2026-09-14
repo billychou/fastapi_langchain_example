@@ -58,6 +58,25 @@ Agent 只负责生成自然语言，**状态转移由内核裁决**。
 | `monologue_cap` | 单条系统消息 ≤ 800 字 | 超出部分转为附件/卡片，不塞进对话 |
 | `escape_hatch` | 学习者说「直接告诉我」→ 必须确认后直答 | 直答不记掌握度，并提示可事后补测 |
 
+**落地状态（P0 #6，已实现）**：五条护栏都在 `app/pedagogy/policy.py`（纯函数，返回
+`Violation(guard, action, detail)`），真正**执行**它们的是
+`app/middleware/agent_pedagogy.py::PedagogyMiddleware.aafter_model` —— 纯函数没人调用
+就等于没有护栏。两条必须写进文档的口径：
+
+1. **软护栏 vs 硬护栏**：`action=log` 的是软护栏（`learner_talk_ratio`，只记事件不改写），
+   其余（`truncate` / `suppress` / `confirm`）会改模型输出。软护栏**只在 post-model 记账一次**：
+   路由侧 pre-events 会过滤 `GuardAction.LOG`，否则一次 HTTP 请求下发两张同样的卡
+   （工具循环里模型还会被调用多次）。硬护栏仍在调模型**之前**下发，学习者先看到
+   「你刚要求直答，需要先确认」。
+2. **护栏跑在流式输出之后**：token 增量早已推给浏览器，服务端收不回来，所以 P0 的做法是
+   「照实改写 + 明确告知」—— 改写后的全文随 `learn.guard.data.replacement` 下发，
+   由前端替换气泡；checkpointer 里存的是改写后的版本，`agent_threads` 预览记的是流式原文
+   （两者刻意允许不同，见 architecture §6 落地状态）。假装没发生会让「学习者看到的」与
+   「账本记的」分叉，那比被截断更糟。
+
+`probe_budget` 的抑制发生在 `loop.tick()` 里（第 4 个追问不再产出 `actions`，
+并把违规记进 `LoopStep.violations`），中间件只负责把它渲染成 `learn.guard` 事件。
+
 ---
 
 ## 2. 学习证据的最小单元
@@ -279,6 +298,33 @@ class ChatContext:
 原则：**agent 不做数据库读写**，状态由 API 层装配后经 context 传入 —— 与现有 skills 的
 「身份经 context 传入」完全同构，单例 agent 的约束不被破坏。
 
+**落地状态（P0 #6，已实现）**：`ChatContext`（`backend/app/context.py`）实际比草案多两个字段：
+
+```python
+learner_id: int = 0                              # P0 与 account_id 同值; P1 家长-学生绑定才分叉
+pedagogy_state: PedagogyState | None = None      # 学习者侧 tick 之后的快照 -> 渲染进系统提示
+pedagogy_step: LoopStep | None = None            # 本轮转移; None = 状态没动
+pedagogy_sink: PedagogySink | None = None        # 本次请求的 learn 事件收集器(可变)
+```
+
+四条实现约束：
+
+1. **`pedagogy_sink is None` 就是普通聊天**：`PEDAGOGY_ENABLED=false`、匿名
+   （`account_id <= 0`）、本线程无载体且本轮无学习意图（闲聊就是闲聊）、上一轮已
+   `Closed`/`Escaped` 且本轮没提出新概念 —— 这四种情况都由
+   `session.prepare_turn()` 返回 `None`，中间件两个钩子原样放行，行为与注入前逐字一致
+   （`tests/test_chat_api.py::test_anonymous_chat_emits_no_learn_events` 断言零 `learn` 帧）。
+2. **`sink` 必须由路由创建、经 context 传入**：`get_agent()` 是进程级单例，中间件实例
+   **不能**持有请求态；`sink` 顺带承担「运行中载体」（`sink.carrier`），中间件每处理一个
+   教练侧事件就续写它，`aafter_model` 再一次性写回 `pedagogy` 频道。
+3. **`PedagogyState` 等类型的 import 必须留在运行期**（不能放进 `TYPE_CHECKING`）：
+   技能工具签名是 `runtime: ToolRuntime[ChatContext]`，pydantic 要为工具生成 args schema，
+   于是会在运行期解析 `ChatContext` 的字段注解；放进去会得到
+   ``PydanticUserError: `load_skill` is not fully defined``，且**只在真正调用工具时才炸**。
+   依赖方向仍是单向的：`app.pedagogy` 从不 import `app.context`。
+4. **注入的只有 `pedagogy_state` 块**（预算 `STATE_BLOCK_MAX_CHARS=1200`，超长先丢细节再硬截断）。
+   `learner_digest`（L2/L3）与「可用 Atom 列表」按计划在 P1 接入，本节草案保持不变。
+
 ---
 
 ## 7. 事件与接口契约
@@ -288,15 +334,35 @@ class ChatContext:
 现有事件：`data: {"choices":[{"delta":{"content":"…"}}]}`，可选顶层 `agent` 字段承载工具链事件。
 新增顶层 `learn` 字段，只读 delta 的客户端会自动忽略（与 `agent` 字段同一套兼容策略）：
 
-```json
-{"choices":[{"delta":{}}], "learn": {"type": "state", "state": "Detect", "loop_index": 2}}
-{"choices":[{"delta":{}}], "learn": {"type": "gap", "gap_type": "causal_gap", "probe": "…"}}
-{"choices":[{"delta":{}}], "learn": {"type": "atom", "id": "atom:…", "statement": "…", "source": "…"}}
-{"choices":[{"delta":{}}], "learn": {"type": "mastery", "concept_id": "…", "before": 0.42, "after": 0.61,
-                                     "next_review": "2026-09-11"}}
+**落地状态（P0 #6，已实现）**：草案把载荷平铺在事件顶层，实现时统一收进 `data` ——
+类型特定字段与公共字段（`type` / `state` / `loop_index`）分开，前端才能「按 `type` 分派、
+按 `data` 渲染」，新增类型不必改解析器。形状由 `app/pedagogy/events.py::LearnEvent.to_sse()`
+产出（空值省略），类型集合是 `state | gap | guard | attachment | mastery | note`：
+
+```jsonc
+// 状态卡: 调模型之前下发(路由侧判读学习者发言即可确定)
+{"choices":[{"delta":{}}], "learn": {"type":"state","state":"Teach","loop_index":1,"data":{
+  "concept_id":"闭包","actions":["ask_explain"],"persona":"feynman-tutor",
+  "probes_left":3,"talk_ratio":0.0,"open_gaps":[],"reason":"…"}}}
+// 卡点: 判分结论带来的新卡点(每个 gap 一帧)
+{"choices":[{"delta":{}}], "learn": {"type":"gap","state":"Detect","loop_index":2,"data":{
+  "gap_type":"causal_gap","probe":"…","severity":"high","claim_id":"…"}}}
+// 护栏: replacement 是改写后的全文, 前端用它替换气泡(见 §1.2 落地状态)
+{"choices":[{"delta":{}}], "learn": {"type":"guard","state":"Return","loop_index":2,"data":{
+  "guard":"no_direct_answer","action":"truncate","detail":"…","replacement":"…"}}}
+// 附件卡: monologue_cap 的溢出内容, 不塞进对话流
+{"choices":[{"delta":{}}], "learn": {"type":"attachment","state":"Teach","loop_index":1,"data":{
+  "title":"被折叠的长内容（monologue_cap 溢出）","text":"…","chars":1200}}}
 ```
 
-P2 再加 `classroom` 字段（speaker / scene / action），沿用 OpenMAIC 的「动作流」思想但保持文本优先。
+`mastery`（掌握度增量）与 `note`（内核的一句说明，例如「本轮发言需要判分器才能推进」）
+形状已定死，但 `mastery` 的数据要等 P0 #7/#8 由 service 层填。草案里的 `atom` 事件
+**没有实现**：Atom 的对外读取走 `/api/v1/learning/concepts/{id}/graph`（§7.2），
+不必在流里再复制一份。
+
+只读 `delta` 的客户端（含现有前端 `DeepSeekChatProvider`）不受任何影响 —— `learn` 帧的
+`choices[0].delta` 是空对象。P2 再加 `classroom` 字段（speaker / scene / action），
+沿用 OpenMAIC 的「动作流」思想但保持文本优先。
 
 ### 7.2 HTTP API（草案）
 

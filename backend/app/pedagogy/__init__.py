@@ -9,7 +9,11 @@
 - :mod:`app.pedagogy.policy`  五条护栏 + ``PEDAGOGY_*`` 阈值(纯函数);
 - :mod:`app.pedagogy.loop`    ``tick(state, event) -> LoopStep`` 纯函数, **裁决权在这里**;
 - :mod:`app.pedagogy.gaps`    判分器: 讲解 -> claims -> 四类卡点(唯一会调 LLM 的一层);
-- :mod:`app.pedagogy.mastery` 掌握度更新/衰减/复习调度(纯函数)。
+- :mod:`app.pedagogy.mastery` 掌握度更新/衰减/复习调度(纯函数);
+- :mod:`app.pedagogy.turn`    请求文本 -> 学习者侧事件(确定性正则, 不调 LLM);
+- :mod:`app.pedagogy.persona` 卡点 -> persona 技能的推荐映射;
+- :mod:`app.pedagogy.session` 一轮 HTTP 请求 -> :class:`PedagogyTurn`(路由侧装配);
+- :mod:`app.pedagogy.events`  ``learn`` SSE 事件 + 单请求收集器 + 跨轮载体。
 
 本包**不碰数据库、不发 HTTP**; 状态由 API/service 层装配后经 ``ChatContext`` 传入
 (与 skills 的「身份经 context 传入」同构, 不破坏 ``get_agent()`` 单例约束)。
@@ -17,6 +21,7 @@
 
 from __future__ import annotations
 
+from app.pedagogy.events import LearnEvent, LearnEventType, LoopCarrier, PedagogySink
 from app.pedagogy.gaps import (
     CAUSAL_CONNECTIVES,
     DEFAULT_PROBES,
@@ -63,6 +68,15 @@ from app.pedagogy.mastery import (
     scheduled_review,
     update_mastery,
 )
+from app.pedagogy.persona import (
+    CHALLENGER,
+    DRILL,
+    LISTENER,
+    PERSONA_BY_GAP,
+    PERSONA_BY_STATE,
+    TUTOR,
+    recommend_persona,
+)
 from app.pedagogy.policy import (
     DIRECT_ANSWER_REWRITE_HINT,
     Guard,
@@ -75,6 +89,7 @@ from app.pedagogy.policy import (
     enforce_probe_budget,
     escape_violation,
     find_solution_start,
+    remaining_probes,
     talk_ratio,
 )
 from app.pedagogy.schemas import (
@@ -100,6 +115,7 @@ from app.pedagogy.schemas import (
     SupplyCompleted,
     Verdict,
 )
+from app.pedagogy.session import PedagogyTurn, prepare_turn
 from app.pedagogy.states import (
     ACTIVE_STATES,
     TERMINAL_STATES,
@@ -109,21 +125,40 @@ from app.pedagogy.states import (
     allowed_events,
     can,
 )
+from app.pedagogy.turn import (
+    CONCEPT_PATTERNS,
+    ESCAPE_RE,
+    TurnIntent,
+    TurnReading,
+    concept_slug,
+    extract_concept,
+    read_turn,
+    wants_direct_answer,
+    wants_to_learn,
+)
 
 __all__ = [
     "ACTIVE_STATES",
     "CAUSAL_CONNECTIVES",
+    "CHALLENGER",
+    "CONCEPT_PATTERNS",
     "DEFAULT_PROBES",
     "DEMOTION_STEPS",
     "DEPTH_FACTOR_FLOOR",
     "DIRECT_ANSWER_REWRITE_HINT",
+    "DRILL",
+    "ESCAPE_RE",
     "EVIDENCE_WEIGHTS",
     "GENERIC_JARGON_PROBE",
     "GRADER_TEMPERATURE",
+    "LISTENER",
     "NON_CREDITING",
     "REVIEW_LADDER_DAYS",
     "SECONDS_PER_DAY",
     "TERMINAL_STATES",
+    "TUTOR",
+    "TurnIntent",
+    "TurnReading",
     "TRANSITIONS",
     "Action",
     "Atom",
@@ -154,12 +189,19 @@ __all__ = [
     "GuardAction",
     "LoopEvent",
     "LlmGrader",
+    "LearnEvent",
+    "LearnEventType",
+    "LoopCarrier",
     "LoopStep",
     "MasteryEntry",
     "MasteryUpdate",
     "MissingEdge",
     "PedagogyConfig",
+    "PERSONA_BY_GAP",
+    "PERSONA_BY_STATE",
+    "PedagogySink",
     "PedagogyState",
+    "PedagogyTurn",
     "ReviewDue",
     "ReviewStep",
     "SimplifyJudged",
@@ -169,6 +211,7 @@ __all__ = [
     "allowed_events",
     "build_prompt",
     "can",
+    "concept_slug",
     "completeness_of",
     "concept_mastery",
     "decay",
@@ -176,6 +219,7 @@ __all__ = [
     "depth_summary",
     "derive_gaps",
     "elapsed_days_since",
+    "extract_concept",
     "evidence_weight",
     "check_talk_ratio",
     "closure_verdict",
@@ -184,16 +228,22 @@ __all__ = [
     "enforce_probe_budget",
     "escape_violation",
     "find_solution_start",
+    "remaining_probes",
     "has_causal_connective",
     "interval_days",
     "new_entry",
+    "prepare_turn",
     "next_review",
+    "read_turn",
     "record",
     "record_many",
+    "recommend_persona",
     "review",
     "review_queue",
     "scheduled_review",
     "talk_ratio",
     "update_mastery",
+    "wants_direct_answer",
+    "wants_to_learn",
     "tick",
 ]
