@@ -14,6 +14,8 @@
 
 建议阅读顺序：vision → pedagogy-core → architecture → roadmap；research 是支撑材料，可随时查阅。
 
-写作基线：`codex/feat-agent-skills` 分支（技能子系统已合入，后端 179 个测试全绿），日期 2026-09-08。
+写作基线：`codex/feat-agent-skills` 分支（技能子系统已合入，后端 179 个测试全绿），日期 2026-09-08；
+其中 [research-deeptutor-openmaic.md](./research-deeptutor-openmaic.md) 的调研日期为 2026-09-14，
+两个参考项目版本迭代很快，引用前请按该文 §4 的维护约定重新核实。
 文档描述的是**方向与设计**，不是已实现的功能；每个阶段落地时请按 `AGENTS.md` 的
 「测试 → 检查 → 单独提交」流程走，并回写这里的设计文档。

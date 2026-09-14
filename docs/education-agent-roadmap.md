@@ -124,7 +124,7 @@ TTS/ASR、MP4 导出、Canvas 幻灯片编辑器、3D/游戏交互、PBL 引擎 
 | 知识资产 | 文档 / EPUB / 视频字幕 → Atom 抽取；检索引擎可插拔（内置 → LightRAG / GraphRAG） | DeepTutor 多引擎 RAG、Immersive Reading |
 | 学科技能库 | `skills/subject-*`：数学、物理、编程、英语、考证；教师可提交（需沙箱与审计升级，见 `backend/docs/skills-design.md` §11） | DeepTutor EduHub、本仓库 skills |
 | 对外分发 | 发布 `SKILL.md` 技能包，让 Codex / OpenClaw / 飞书等 Agent 工作台直接调用「费曼教练」 | OpenMAIC skills/openmaic |
-| 评估闭环 | LearnerSim 多画像、人工标注集扩充、判分器版本化 + 一致性看板、教学策略 A/B | DeepTutor TutorBench、OpenMAIC AIME/MAIC-Bench |
+| 评估闭环 | LearnerSim 多画像、人工标注集扩充、判分器版本化 + 一致性看板、教学策略 A/B | DeepTutor TutorBench；OpenMAIC 仅有论文 *From MOOC to MAIC*（无公开榜单） |
 | 多角色 | 家长-学生绑定、教师班级视图、共性卡点热力图 | DeepTutor learner/guardian |
 | 呈现增强 | PPTX 导出、可选 TTS、交互 HTML 沙箱 | OpenMAIC 导出 |
 | 成本与运维 | 每账号 token 预算、模型分级路由（判分用小模型、生成用大模型） | OpenMAIC 分阶段模型路由 |

@@ -6,6 +6,7 @@ A small full-stack demo: a FastAPI + LangChain agent backend that streams replie
 
 - `backend/` — FastAPI + LangChain 1.x / LangGraph agent (SSE chat at `POST /api/chat`) **plus an integrated enterprise user & auth system** (multi-identity accounts, dual-token JWT, RBAC, rate limiting, PII encryption) under `/api/v1`.
 - `frontend/` — Next.js 16 + React 19 + Ant Design X chat UI, wired to the backend via `@ant-design/x-sdk`'s `DeepSeekChatProvider`.
+- `docs/` — 产品演变方向（设计文档，非已实现功能）：把本仓库演变成以费曼学习法为主控制流、以第一性原理为知识结构的通用教育智能体。从 [`docs/README.md`](docs/README.md) 开始读（vision → pedagogy-core → architecture → roadmap，附 DeepTutor / OpenMAIC 调研笔记）。
 
 ## Quick start
 

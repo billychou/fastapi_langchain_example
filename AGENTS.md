@@ -13,6 +13,7 @@ FastAPI + LangChain agent backend (SSE chat, dual-token JWT auth + RBAC) with a 
 - `backend/tests/` — pytest suite (`conftest.py` freezes MySQL/Redis/LLM to mocks and dead ports). New backend behaviour gets a test file here.
 - `backend/migrations/` — fresh-database bootstrap SQL (DDL + RBAC seed + alembic version stamp). `backend/alembic/` — Alembic migrations; all schema changes after bootstrap go here (`uv run alembic revision --autogenerate`, then `uv run alembic upgrade head`). `backend/docker-compose.yml` — local MySQL 8 + Redis 7. `backend/docs/architecture.md` — diagrams and token flows. `backend/docs/skills-design.md` — how the skill subsystem works and how to add a skill.
 - `frontend/src/app/` — App Router pages: `page.tsx` (chat), `login/`, `register/`, `users/`. `frontend/src/lib/` — auth context, API client. `frontend/public/` — static assets.
+- `docs/` — 产品演变方向的设计文档（中文，描述**方向与设计**而非已实现功能）：`docs/README.md` 是索引，其余为 `education-agent-vision.md`、`pedagogy-core.md`、`education-agent-architecture.md`、`education-agent-roadmap.md`、`research-deeptutor-openmaic.md`（DeepTutor / OpenMAIC 事实调研笔记，含「待核实」清单）。落地任一阶段时先读对应文档，并回写它。
 
 ## Build, Test, and Development Commands
 
@@ -47,7 +48,7 @@ Work in small increments: implement one feature (or one fix), verify it, commit 
 5. **If a check fails: fix it and re-run.** Do not commit red, do not bypass hooks with `--no-verify`, and do not delete or `skip` a failing test just to get past it.
 6. **If you changed dependencies**, re-lock with `UV_DEFAULT_INDEX=https://pypi.org/simple/ uv lock` and verify the lockfile is mirror-free (`grep -iE 'aliyun|tsinghua|douban' backend/uv.lock` must print nothing) before committing — CI rejects mirror URLs.
 7. **Push and open the PR when the task calls for review**; otherwise leave the commit on the local working branch. Never force-push shared branches and never amend a commit that is already pushed.
-8. **Update the docs in the same commit** when the change makes them stale (`README.md`, `backend/README.md`, `backend/docs/architecture.md`, this file).
+8. **Update the docs in the same commit** when the change makes them stale (`README.md`, `backend/README.md`, `backend/docs/architecture.md`, `docs/*.md`, this file).
 
 One working feature = one commit (or a short series of green commits). If you are mid-way through a larger change, commit at each point where the checks pass rather than accumulating a giant diff.
 

@@ -153,7 +153,7 @@ flowchart LR
 | 多智能体 | Subagents / Partners（外接 Claude Code、Codex 等 harness） | AI 老师 + AI 同学 + LangGraph「导演图」编排 | **借 OpenMAIC 的导演图思路**，但轻量实现：LangGraph 子图 + persona skill，不做完整回放引擎 |
 | 知识检索 | 多引擎 RAG（LlamaIndex / PageIndex / GraphRAG / LightRAG / WeKnora / Obsidian） | 文档解析 + web search | **先最小可用**：文档 → Atom 抽取 + 向量检索；引擎做成可插拔，后期可接 LightRAG/GraphRAG |
 | 技能生态 | EduHub 社区技能 + MCP + CLI apps | `SKILL.md` 技能包，可被 Codex / OpenClaw / WorkBuddy 调用 | **我们的现成优势**：已有 skills 子系统 + RBAC + 热加载，直接长成「教学法/学科技能库」，并对外发布 skill 包 |
-| 评估 | TutorBench + profile-driven student simulator（LLM 第一人称交互式评测） | AIME（AI-MOOC Exam）、MAIC-Bench | **必做**：没有 LearnerSim 就无法迭代教学策略（P0 就要有雏形） |
+| 评估 | TutorBench + profile-driven student simulator（LLM 第一人称交互式评测） | 论文 *From MOOC to MAIC*（JCST 2026）；README 未给公开榜单数据 | **必做**：没有 LearnerSim 就无法迭代教学策略（P0 就要有雏形） |
 | 账号与合规 | learner / guardian 账号 | ACCESS_CODE 站点口令 | **我们的现成优势**：RBAC + PII 加密 + 审计直接支撑学生/家长/教师与未成年人合规 |
 | 部署形态 | pip 包 + CLI + Docker，本地优先 | Next.js Web + Docker + Vercel + Postgres 持久化 | 沿用本仓库：FastAPI 后端 + Next.js 前端 + compose 一键起 |
 
