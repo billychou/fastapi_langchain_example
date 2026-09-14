@@ -52,9 +52,12 @@ backend/skills/                    # SKILLS_DIR，可配绝对路径
 ├── trip-planner/                  # 目录名 == frontmatter name（强制一致）
 │   ├── SKILL.md                   # 唯一必需文件
 │   └── references/checklist.md    # 可选附件（L3）
-└── expense-report/
+├── expense-report/
+│   ├── SKILL.md
+│   └── references/policy.md
+└── feynman-tutor/ …               # 四个教学法 persona（见 §12）
     ├── SKILL.md
-    └── references/policy.md
+    └── references/{loop-sop.md, gap-taxonomy.md}
 ```
 
 `SKILL.md` = YAML frontmatter（声明）+ Markdown 正文（说明书）。frontmatter 只做声明，
@@ -256,3 +259,91 @@ mkdir -p backend/skills/code-review/references
   `allows()` 上加分支，不影响调用方。
 - **技能版本并存**：`version` 目前只用于展示与日志。需要灰度时应改成
   `skills/<name>/<version>/` 布局，而不是在同一目录里堆多个 `SKILL.md`。
+
+## 12. 教学法 persona 技能（P0 #5）
+
+这四个技能不是「又一批功能说明」，而是把 `docs/pedagogy-core.md` §5 的 persona 约束
+从提示词常量变成**可版本化的数据**。分工原则只有一条：
+
+> 技能描述**语气与 SOP**（谁在说话、怎么问、不许说什么）；
+> 状态转移仍由 `app/pedagogy/loop.py` 裁决。技能正文里出现「进入下一状态」的措辞即为 bug。
+
+| 技能 | 角色 | `visibility` | `tools` | `references/` |
+|---|---|---|---|---|
+| `feynman-tutor` | 教练：编排循环、按状态下发唯一动作 | `auth` | `[calculate]` | `loop-sop.md`（七态 SOP + 护栏对照 + 配置默认值表）、`gap-taxonomy.md` |
+| `feynman-listener` | 小白同学：靠「听不懂」暴露术语盾 | `auth` | `[]` | `question-bank.md`（问法库 + 禁止句式） |
+| `first-principles-drill` | Why-chain：把断言下探到 definition/axiom/observable | `auth` | `[calculate]` | `why-chain.md`（下探规则 + 假可停点清单） |
+| `boundary-challenger` | 抬杠同学：索取反例、边界、类比失效点 | `auth` | `[calculate]` | `counterexample-recipes.md`（8 种反例配方） |
+
+与既有技能（`trip-planner` / `expense-report`）相比，有三处**刻意的不同**：
+
+### 12.1 `auth` 而不是 `permission`：教学法是默认行为
+
+教学法不是要「开箱」的增值功能，所以不设 `skill:<name>:use` 权限点，也不需要 Alembic
+播种（`migrations/005_learning.sql` 播种的是 `learning:*` **接口**权限点，没有任何
+`skill:<persona>:use`）。但**匿名仍不可见**：
+一轮循环要写 `learner_explanation` 与 `mastery_ledger`，这些表都以 `account_id` 归属证据；
+对匿名用户展示教练，等于承诺一件做不到的事。
+
+因此 `tests/test_migrations.py::test_gated_bundled_skills_require_seeded_permissions`
+无需改动 —— 门禁示例仍由 `expense-report` 提供。同时
+`tests/test_pedagogy_skills.py` 里有一条**反向绊线**：断言这四个技能是 `auth` 且
+`requires_permissions == []`。谁将来给它加上权限点，测试会立刻红，逼他先回答
+「教学法凭什么要授权」。
+
+### 12.2 技能内容是「写给内核的说明书」，漂移没有运行时报错
+
+`trip-planner` 写错了，最多是行程难看；persona 写错了，会**向学习者承诺一个内核不执行的
+阈值**：手册说「自述不少于 80 字」，而 `PedagogyConfig.min_explain_chars` 已改成 120，
+于是学习者写到 100 字被教练判不达标，且没有任何一方报错。所以一致性靠对账测试，不靠自觉：
+
+| 对账项 | 测试 | 失配的后果 |
+|---|---|---|
+| `loop-sop.md` 的 `PEDAGOGY_*` 默认值表 ↔ `PedagogyConfig.model_fields` + `Settings` 字段名 | `test_loop_sop_config_defaults_match_pedagogy_config` | 教练承诺的阈值与内核判定不一致 |
+| 七态全覆盖（`FeynmanState`） | `test_tutor_covers_every_feynman_state` | 新增状态后教练不知道该做什么，直接沉默 |
+| 卡点词表恰为四类（`GapType`） | `test_gap_vocabulary_is_exactly_the_four_types` | 自创类型 → 判分一致率（Cohen's κ）下降 → 掌握度账本失去意义 |
+| 护栏名逐字等于内核 `Guard` 枚举 | `test_guard_names_match_the_kernel` | 教练声称「已避开护栏」，实际撞在另一条上 |
+| `Detect`/`Return` 的输出模板实跑 `enforce_no_direct_answer()` | `test_sop_output_templates_survive_no_direct_answer` | SOP 教的就是一个必然被内核截断改写的写法 |
+| 正文引用的 `references/*.md` 真实存在 | `test_referenced_attachment_paths_exist` | 模型收到「文件不存在」后自行编造 SOP |
+
+改预算数字、加 gap 类型、改护栏名时，**必须同时改内核枚举/配置与技能正文**，
+两边一起提交（`AGENTS.md` 的 test→commit 规则）。
+
+### 12.3 `tools` 在这里是「语气约束」，不是能力清单
+
+注册表的 `known_tools` 按 `app/tools.py:ALL_TOOLS` 的真实工具名校验（声明不存在的工具
+会加载失败），但 persona 的 `tools` 用途与工具型技能不同：
+
+- `feynman-listener` 刻意声明 `tools: []` —— 一个能查资料、能算数的「小白」不再是小白，
+  它一旦拿到信息就会说漏嘴，那一轮的证据就废了。这条**空声明本身**有测试守着
+  （`test_listener_deliberately_declares_no_tools`），避免有人「顺手补上工具」。
+- `first-principles-drill` / `boundary-challenger` 只给 `calculate`：用途是**把数值断言
+  算准**（「d_k=512 时 √d_k 是多少」），不是去检索答案。算错的情境会被学习者当场识破，
+  产出的就是错误证据。
+- 注意 `SkillMiddleware` 只在**一个技能都不可见**时摘掉技能工具，并不会按技能声明收敛
+  工具子集；所以 `tools` 是提示，真正的隔离仍要靠服务端（P0 #6 的 `pedagogy_state` 下发）。
+
+### 12.4 三级披露的预算实测
+
+预算单位是**字符**（中文一字算一个），不是字节。当前实测：
+
+| 层级 | 预算 | 实测 | 余量 |
+|---|---|---|---|
+| L1 目录（六个技能） | `SKILL_MAX_CATALOG_CHARS=2000` | 649，无 `另有` 截断 | ~3× |
+| L2 正文 | `max_body_chars=8000` | 教练 2994，其余 1673 / 2101 / 1709 | ≥2.7× |
+| L3 附件 | `SKILL_MAX_FILE_BYTES` + 正文截断 | `loop-sop.md` 4493，其余 1.9k–3.3k | 充足 |
+
+新增 persona 时这三条要重新量：**教练被目录截掉，等于教学法不存在**（L1 只剩
+`description`，正文根本不会被读）；SOP 被 `…[内容已截断]` 切掉尾巴，模型就照着半份手册执行。
+`test_catalog_fits_budget_without_truncation` 与 `test_bodies_and_attachments_fit_their_budgets`
+把这两件事变成了红灯，不必靠人记。
+
+### 12.5 persona 之间怎么交话筒
+
+四个技能各自写清「什么时候交回教练 / 交给谁」，并按**互斥的动作维度**切分，避免同一轮里
+两个 persona 抢话：`listener` 拆术语（横向）、`drill` 挖依赖（纵向）、`challenger` 要边界
+（横向反例）、`tutor` 编排与补给。三个子 persona **都不许宣布闭合**
+（`test_sub_personas_never_claim_to_decide_closure`）—— 闭合是内核的裁决。
+
+P0 #5 只做到「正文写清分工」；按 `pedagogy_state` 自动选择 persona 的编排逻辑属于
+P0 #6（`app/middleware/agent_pedagogy.py`），P2 的「导演」节点再在其上加多智能体课堂。

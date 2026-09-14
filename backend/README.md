@@ -66,6 +66,8 @@ backend/
 │   ├── api/v1/          # auth / account / admin / skills 路由
 │   └── schemas/         # chat / auth / 统一信封
 ├── skills/              # 技能内容(数据而非代码): trip-planner(公开) / expense-report(权限门禁)
+│                        #   + 四个教学法 persona(登录后可见): feynman-tutor / feynman-listener /
+│                        #     first-principles-drill / boundary-challenger
 ├── migrations/          # 初始建库: MySQL DDL + RBAC 种子 + alembic 版本标记
 ├── alembic/             # 模式迁移的唯一事实来源(增量变更走这里)
 ├── docs/architecture.md # 架构图 + 双 Token 时序图

@@ -201,14 +201,45 @@ Agent 只负责生成自然语言，**状态转移由内核裁决**。
 
 ## 5. 苏格拉底约束与 persona
 
-内核默认三个 persona，全部以 **Skill** 形式落地（`backend/skills/<name>/SKILL.md`），
+内核默认四个 persona，全部以 **Skill** 形式落地（`backend/skills/<name>/SKILL.md`），
 而不是硬编码提示词 —— 这样教学法可版本化、可 A/B、可被外部 Agent 工作台复用：
 
-| Persona | 职责 | 语言风格约束 | 禁止 |
+| Persona（技能目录名） | 职责 | 语言风格约束 | 禁止 |
 |---|---|---|---|
-| `feynman-listener`（小白同学） | 听讲解、只问「这是什么意思 / 为什么」 | 短句、外行词汇、每次只问一个 | 使用学科术语；给出正确答案 |
-| `socratic-tutor`（教练） | 组织循环、下探 Why-chain、裁决闭合 | 明确、克制、给出下一步动作 | 一次性输出完整解法；连续追问超预算 |
-| `boundary-challenger`（抬杠同学） | 索取反例、边界、失效场景 | 挑衅但友好，给具体情境 | 人身评价；无情境的空泛质疑 |
+| `feynman-tutor`（教练 / socratic-tutor） | 组织循环、编排其余 persona、裁决闭合前的证据齐备性 | 明确、克制、一轮一个动作 | 一次性输出完整解法；连续追问超预算；自行宣布状态转移 |
+| `feynman-listener`（小白同学） | 听讲解、只问「这是什么意思 / 为什么」 | 短句、外行词汇、每次只问一个 | 使用学科术语；给出正确答案；调用任何工具 |
+| `first-principles-drill`（Why-chain 下探） | 把断言往下拆到 definition/axiom/observable，记录 depth 与落点 | 一次只问一层，纵向不横向 | 替学习者说出答案；在术语盾上挖链；越出本轮 `scope` |
+| `boundary-challenger`（抬杠同学） | 索取反例、适用边界、类比失效点 | 挑衅但友好，给具体情境 | 人身评价；无情境的空泛质疑；造自己不知道答案的题 |
+
+> **命名说明**：本文早期版本把教练写作 `socratic-tutor`，落地时用 `feynman-tutor`
+> （与 architecture §3 的目录树、roadmap P0 #5 一致）。「苏格拉底」是它的**手法**
+> （只问不答），「费曼」是它的**目标**（让学习者讲出来），后者更适合做技能名。
+
+**落地状态（P0 #5，已实现）**：四个技能目录 + 各自的 `references/` 附件已就位：
+
+```
+backend/skills/
+├── feynman-tutor/           SKILL.md + references/{loop-sop.md, gap-taxonomy.md}
+├── feynman-listener/        SKILL.md + references/question-bank.md
+├── first-principles-drill/  SKILL.md + references/why-chain.md
+└── boundary-challenger/     SKILL.md + references/counterexample-recipes.md
+```
+
+三条落地约束（都由 `backend/tests/test_pedagogy_skills.py` 守卫）：
+
+1. **`visibility: auth`，不设权限点。** 教学法是默认行为，不该按权限点开箱；
+   但匿名不可见 —— 循环要写 `learner_explanation` / `mastery_ledger`，没有账号就没有
+   证据的归属，向匿名用户展示教练等于承诺一件做不到的事。
+2. **手册里的预算数字必须等于 `PedagogyConfig` 的默认值。** `loop-sop.md` 有一张
+   `PEDAGOGY_*` 默认值表，测试逐项与 `PedagogyConfig.model_fields` 对账。
+   手册上的数字是**对学习者的承诺**：配置改了手册没改，教练就会说「不少于 80 字」
+   而内核按别的数判不达标，且没有任何运行时报错。
+3. **手册教的输出格式必须能通过护栏。** `loop-sop.md` 里 `Detect`/`Return` 的输出模板
+   被实际填进 `enforce_no_direct_answer()` 验证不会被截断（并附一个「错误写法」反证）。
+   否则 SOP 教的就是一个必然被内核改写的写法。
+
+技能只描述**语气与 SOP**，不描述状态转移：状态由 `app/pedagogy/loop.py` 裁决，
+技能里凡出现「进入下一状态」的措辞都视为 bug（设计信条 1）。
 
 P2 的多智能体课堂在此之上加「导演」节点（见 architecture §6），persona 数量可扩展但约束表结构不变。
 
