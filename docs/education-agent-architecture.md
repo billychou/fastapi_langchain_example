@@ -189,72 +189,126 @@ RBAC 承载角色与报告门禁。新增代码集中在 `app/pedagogy/`、`app/
 ## 4. 数据模型（新增表，DDL 草图）
 
 命名沿用现有风格（BigInteger 主键、`created_at/updated_at` server_default、中文 comment）。
-所有变更走 Alembic 迁移，并同步 `backend/migrations/002_seed_rbac.sql` 里的权限点。
+所有变更走 Alembic 迁移，并同步 initdb 种子 SQL 里的权限点。
+
+> **落地状态（P0 #4，已实现）**：下面前五张表（`learning_concept` / `learning_atom` /
+> `learning_atom_edge` / `learner_explanation` / `mastery_ledger`）已经按本节实现，
+> **真值在三处**，草图只是导览：
+> - `backend/app/models/learning.py` — SQLAlchemy 模型（`server_default` 与 DDL 逐字一致）
+> - `backend/alembic/versions/f3a9c1d47b60_add_learning_tables.py` — 既有库的升级路径
+> - `backend/migrations/005_learning.sql` — 新建库的 initdb 路径（含 `INSERT IGNORE` 权限种子）
+>
+> 三条路径的列名/类型/可空性/默认值/唯一键/索引由 `backend/tests/test_migrations.py`
+> 做模型↔DDL 对账（变异测试守卫，改一边不改另一边会红）；落库行为（唯一约束、级联删除、
+> `Decimal` 精度、`MasteryLedger` ↔ `MasteryEntry` 往返）由
+> `backend/tests/test_learning_models.py` 守卫。
+>
+> 与草图的两处刻意偏差：
+> 1. **权限种子不放 `002_seed_rbac.sql`**，而是随表进 `005_learning.sql`（新增
+>    `learning:self:read`、`learning:explanation:write`、`learning:report:read`、
+>    `learning:atom:admin`；`member` 拿前两个，`operator` 拿 `report:read`）。
+>    接口在 P0 #7 落地，先播种避免上线即 403。
+> 2. **外键一律 `ON DELETE CASCADE`**（账号注销 = 学习证据一并清理，知识图作为公共资产
+>    在账号维度上不悬挂）；迁移里用 `_bigint_id_type()` 运行时内省 `account.id` 的真实类型，
+>    因为 MySQL 要求外键两端类型**含 UNSIGNED 完全一致**（initdb 建的 `account.id` 是
+>    `BIGINT UNSIGNED`，而纯 Alembic 世界里是有符号的），内省失败才退回 `BigInteger()`。
 
 ```sql
 -- 概念与知识原子（学科无关的图结构）
 CREATE TABLE learning_concept (
-  id            BIGINT PRIMARY KEY AUTO_INCREMENT,
-  slug          VARCHAR(128) NOT NULL UNIQUE COMMENT '概念标识, 如 attention-scaled-dot-product',
+  id            BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  slug          VARCHAR(128) NOT NULL COMMENT '概念标识, 如 attention-scaled-dot-product',
   title         VARCHAR(255) NOT NULL,
   subject       VARCHAR(64)  NULL COMMENT '学科标签, 仅用于筛选, 不参与内核逻辑',
-  scope         TEXT         NULL COMMENT '范围边界: 明确不讨论什么',
+  scope         TEXT         NULL COMMENT '范围边界: 明确不讨论什么(no_boundary 卡点的判据)',
   summary       TEXT         NULL,
-  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_concept_slug (slug)     -- 具名: 迁移与 DDL 对账要按名字比
 ) COMMENT='概念节点';
 
 CREATE TABLE learning_atom (
-  id            BIGINT PRIMARY KEY AUTO_INCREMENT,
-  atom_key      VARCHAR(191) NOT NULL UNIQUE COMMENT '稳定标识 atom:xxx',
-  concept_id    BIGINT NOT NULL,
+  id            BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  atom_key      VARCHAR(191) NOT NULL COMMENT '稳定标识 atom:xxx(即内核 Atom.id)',
+  concept_id    BIGINT UNSIGNED NOT NULL,
   statement     TEXT NOT NULL COMMENT '不可再分的最小命题',
-  kind          VARCHAR(16) NOT NULL COMMENT 'definition|axiom|observable|derivable',
+  kind          VARCHAR(16) NOT NULL COMMENT 'definition|axiom|observable|derivable(前三者是 Why-chain 可停点)',
   source_title  VARCHAR(255) NULL,
   source_locator VARCHAR(255) NULL COMMENT '章节/页码/时间戳',
   source_url    VARCHAR(1024) NULL,
   verified      TINYINT(1) NOT NULL DEFAULT 0 COMMENT '未溯源不得进入掌握度记账',
-  difficulty    TINYINT NOT NULL DEFAULT 2 COMMENT '1-5, 出题难度校准用',
+  difficulty    TINYINT NOT NULL DEFAULT 1 COMMENT '1-5, 出题难度校准用(与 schemas.Atom 默认值一致)',
   created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
-  KEY idx_atom_concept (concept_id)
+  UNIQUE KEY uk_atom_key (atom_key),
+  KEY idx_atom_concept (concept_id),
+  CONSTRAINT fk_atom_concept FOREIGN KEY (concept_id)
+    REFERENCES learning_concept (id) ON DELETE CASCADE
 ) COMMENT='知识原子';
 
 CREATE TABLE learning_atom_edge (
-  id            BIGINT PRIMARY KEY AUTO_INCREMENT,
-  from_atom_id  BIGINT NOT NULL,
-  to_atom_id    BIGINT NOT NULL,
+  id            BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  from_atom_id  BIGINT UNSIGNED NOT NULL,
+  to_atom_id    BIGINT UNSIGNED NOT NULL,
   relation      VARCHAR(16) NOT NULL COMMENT 'depends_on|entails|contradicts',
   weight        DECIMAL(4,3) NOT NULL DEFAULT 1.000 COMMENT '关键边权重更高',
-  UNIQUE KEY uk_edge (from_atom_id, to_atom_id, relation)
+  UNIQUE KEY uk_edge (from_atom_id, to_atom_id, relation),
+  KEY idx_edge_from (from_atom_id),
+  KEY idx_edge_to (to_atom_id),
+  CONSTRAINT fk_edge_from FOREIGN KEY (from_atom_id)
+    REFERENCES learning_atom (id) ON DELETE CASCADE,
+  CONSTRAINT fk_edge_to FOREIGN KEY (to_atom_id)
+    REFERENCES learning_atom (id) ON DELETE CASCADE
 ) COMMENT='原子依赖边(第一性原理的图化身)';
 
 -- 学习证据与账本
 CREATE TABLE learner_explanation (
-  id            BIGINT PRIMARY KEY AUTO_INCREMENT,
-  account_id    BIGINT NOT NULL,
-  thread_id     VARCHAR(64) NULL COMMENT '关联 LangGraph thread',
-  concept_id    BIGINT NOT NULL,
-  loop_index    TINYINT NOT NULL DEFAULT 1,
+  id            BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  account_id    BIGINT UNSIGNED NOT NULL,
+  thread_id     VARCHAR(64) NULL COMMENT '关联 LangGraph thread(L1 记忆)',
+  concept_id    BIGINT UNSIGNED NOT NULL,
+  loop_index    TINYINT NOT NULL DEFAULT 1 COMMENT '第几轮 Teach(1 起, 上限 PedagogyConfig.max_loops)',
   state         VARCHAR(16) NOT NULL COMMENT 'Pick|Teach|Detect|Return|Simplify|Closed|Escaped',
-  raw_text      MEDIUMTEXT NOT NULL COMMENT '学习者原话, 不加工',
+  raw_text      MEDIUMTEXT NOT NULL COMMENT '学习者原话, 不加工(其他方言退回 TEXT)',
   claims_json   JSON NOT NULL COMMENT '命题拆解 + status',
   gap_report_json JSON NULL COMMENT '四类卡点 + probe + supply',
-  learner_talk_ratio DECIMAL(4,3) NULL,
+  learner_talk_ratio DECIMAL(4,3) NULL COMMENT 'learner_chars/(learner+system), 护栏口径',
   created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
-  KEY idx_expl_account (account_id, concept_id, created_at)
+  KEY idx_expl_account (account_id, concept_id, created_at),
+  CONSTRAINT fk_expl_account FOREIGN KEY (account_id)
+    REFERENCES account (id) ON DELETE CASCADE,
+  CONSTRAINT fk_expl_concept FOREIGN KEY (concept_id)
+    REFERENCES learning_concept (id) ON DELETE CASCADE
 ) COMMENT='讲解证据(费曼循环的原始产物)';
 
 CREATE TABLE mastery_ledger (
-  id            BIGINT PRIMARY KEY AUTO_INCREMENT,
-  account_id    BIGINT NOT NULL,
-  atom_id       BIGINT NOT NULL,
-  mastery       DECIMAL(5,4) NOT NULL DEFAULT 0.0000,
-  evidence_count INT NOT NULL DEFAULT 0,
+  id            BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  account_id    BIGINT UNSIGNED NOT NULL,
+  atom_id       BIGINT UNSIGNED NOT NULL,
+  mastery       DECIMAL(5,4) NOT NULL DEFAULT 0.0000 COMMENT '掌握度 m ∈ [0,1]',
+  evidence_count INT NOT NULL DEFAULT 0 COMMENT '有效证据条数(读直答/放弃不计数)',
   last_evidence_at DATETIME NULL,
-  next_review_at DATETIME NULL COMMENT '间隔重复调度',
-  review_stage  TINYINT NOT NULL DEFAULT 0 COMMENT '1/3/7/21/60 天阶梯下标',
-  updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  UNIQUE KEY uk_mastery (account_id, atom_id)
+  next_review_at DATETIME NULL COMMENT '间隔重复调度(1/3/7/21/60 天阶梯)',
+  review_stage  TINYINT NOT NULL DEFAULT 0 COMMENT '复习阶梯下标(REVIEW_LADDER_DAYS 的索引)',
+  -- 下面两列让 MasteryEntry 能整条往返: m+α·w·(1−m) 与 m·exp(−Δt/τ) 的输入全部可回溯
+  tau_days      DECIMAL(6,3) NOT NULL DEFAULT 7.000 COMMENT '遗忘时间常数 τ(天): 冷启动取配置, 之后按该 Atom 历史表现拟合',
+  depth         TINYINT NOT NULL DEFAULT 0 COMMENT '最近一次 Why-chain 下探深度(证据权重修正用)',
+  updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最近记账时间(衰减按此算 Δt)',
+  UNIQUE KEY uk_mastery (account_id, atom_id),
+  KEY idx_mastery_review (account_id, next_review_at),   -- 复习队列: 按人取到期项
+  CONSTRAINT fk_mastery_account FOREIGN KEY (account_id)
+    REFERENCES account (id) ON DELETE CASCADE,
+  CONSTRAINT fk_mastery_atom FOREIGN KEY (atom_id)
+    REFERENCES learning_atom (id) ON DELETE CASCADE
 ) COMMENT='掌握度账本: 每条边一行, 可回溯证据';
+
+-- RBAC 权限点(与迁移 f3a9c1d47b60 的 PERMISSIONS/GRANTS 一致, 落在 005_learning.sql)
+INSERT IGNORE INTO permission (perm_code, perm_name, resource, api_method, api_path) VALUES
+  ('learning:self:read',         '查看自己的学习数据',   'learning', 'GET',  '/api/v1/learning/*'),
+  ('learning:explanation:write', '写入讲解证据',         'learning', 'POST', '/api/v1/learning/explanations'),
+  ('learning:report:read',       '查看学习报告',         'learning', 'GET',  '/api/v1/learning/report'),
+  ('learning:atom:admin',        '维护概念图与知识原子', 'learning', 'POST', '/api/v1/learning/concepts');
+-- member → learning:self:read + learning:explanation:write; operator → learning:report:read
+
+-- ↓↓↓ 以下属 P1+（记忆三层 / 班级），仍是草图，尚未落地 ↓↓↓
 
 CREATE TABLE learner_fact (            -- L2：结构化学习者事实
   id            BIGINT PRIMARY KEY AUTO_INCREMENT,

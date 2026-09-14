@@ -3,6 +3,14 @@ from app.models.account import Account, UserProfile
 from app.models.agent_thread import AgentThread
 from app.models.audit import AuditLog, LoginLog
 from app.models.credential import AuthCredential
+from app.models.learning import (
+    ATOM_RELATIONS,
+    LearnerExplanation,
+    LearningAtom,
+    LearningAtomEdge,
+    LearningConcept,
+    MasteryLedger,
+)
 from app.models.rbac import AccountRole, Menu, Permission, Role, RoleMenu, RolePermission
 
 __all__ = [
@@ -18,4 +26,10 @@ __all__ = [
     "RoleMenu",
     "LoginLog",
     "AuditLog",
+    "LearningConcept",
+    "LearningAtom",
+    "LearningAtomEdge",
+    "LearnerExplanation",
+    "MasteryLedger",
+    "ATOM_RELATIONS",
 ]

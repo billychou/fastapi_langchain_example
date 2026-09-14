@@ -35,6 +35,9 @@ down_revision: str | Sequence[str] | None = '409a7d6da51e'
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
+#: 本迁移的数据种子在 initdb 路径上的对应文件(新建库不重放迁移, 见模块 docstring)。
+INITDB_SEED_SQL: str = "002_seed_rbac.sql"
+
 # (perm_code, perm_name, resource, api_method, api_path)
 PERMISSIONS: tuple[tuple[str, str, str, str | None, str | None], ...] = (
     ("skill:admin", "管理技能", "skill", "POST", "/api/v1/skills/reload"),
