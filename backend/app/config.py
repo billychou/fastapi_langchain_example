@@ -69,6 +69,23 @@ class Settings(BaseSettings):
     skill_max_file_bytes: int = 256 * 1024  # L3 read_skill_file 单文件字节上限
     skill_max_files_per_skill: int = 100  # 单个技能可索引的附件数量上限
 
+    # ================= 教学法内核(费曼循环 / Pedagogy) =================
+    # 阈值全部配置化: 调参不需要改代码(docs/education-agent-roadmap.md §0 原则 4)。
+    # 默认值即 docs/pedagogy-core.md 里写明的数字。
+    pedagogy_enabled: bool = True  # 关闭时中间件不注入教学状态, 行为退回普通聊天
+    pedagogy_min_explain_chars: int = 80  # MIN_EXPLAIN_CHARS: 自述达标字数, 不足则留在 Teach
+    pedagogy_max_loops: int = 3  # MAX_LOOPS: 进入 Teach 的次数上限, 触顶则要求升级策略
+    pedagogy_max_probes_per_turn: int = 3  # MAX_PROBES_PER_TURN: 单轮追问预算
+    pedagogy_monologue_cap_chars: int = 800  # 单条系统消息上限, 超出转附件卡片
+    pedagogy_return_max_chars: int = 600  # Return 单次补给总字数预算
+    pedagogy_min_learner_talk_ratio: float = 0.5  # 学习者发言占比下限(软护栏)
+    pedagogy_min_solution_steps: int = 3  # 判定「完整解题步骤」所需的最少步骤编号数
+    pedagogy_min_completeness: float = 0.8  # 闭合门槛: 必要 Atom 覆盖率
+    pedagogy_min_own_words: float = 0.6  # 闭合门槛: 自述程度(非照抄材料)
+    pedagogy_why_chain_max_depth: int = 5  # WHY_CHAIN_MAX_DEPTH: 第一性原理下探深度上限
+    pedagogy_mastery_alpha: float = 0.35  # 掌握度更新步长 α
+    pedagogy_mastery_coldstart_tau_days: float = 7.0  # 遗忘衰减半衰期冷启动值 τ(天)
+
     # ================= 聊天接口保护 =================
     chat_max_messages: int = 100  # 单次请求消息条数上限
     chat_max_message_chars: int = 32_000  # 单条消息字符数上限
