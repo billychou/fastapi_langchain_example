@@ -57,87 +57,95 @@ const LoginPage: React.FC = () => {
         background: 'linear-gradient(135deg, #f0f5ff 0%, #e6fffb 100%)',
       }}
     >
-      <Card style={{ width: 400, boxShadow: '0 8px 24px rgba(0,0,0,0.08)' }}>
-        <Title level={3} style={{ textAlign: 'center', marginBottom: 4 }}>
-          欢迎回来
-        </Title>
-        <Text
-          type="secondary"
-          style={{ display: 'block', textAlign: 'center', marginBottom: 24 }}
-        >
-          登录后即可使用 AI 助手对话
-        </Text>
+      <div style={{ width: 400 }}>
+        <div style={{ textAlign: 'center', marginBottom: 20 }}>
+          <Title level={3} style={{ color: '#5b5bd6', marginBottom: 4 }}>
+            AI运维智能平台
+          </Title>
+          <Text type="secondary">企业级多智能体运维协作平台</Text>
+        </div>
+        <Card style={{ boxShadow: '0 8px 24px rgba(0,0,0,0.08)' }}>
+          <Title level={3} style={{ textAlign: 'center', marginBottom: 4 }}>
+            欢迎回来
+          </Title>
+          <Text
+            type="secondary"
+            style={{ display: 'block', textAlign: 'center', marginBottom: 24 }}
+          >
+            登录后即可使用 AI 助手对话
+          </Text>
 
-        <Form<LoginForm>
-          layout="vertical"
-          onFinish={onFinish}
-          initialValues={{ identity_type: 'phone' }}
-        >
-          <Form.Item label="登录方式">
-            <Segmented
-              block
-              value={identityType}
-              onChange={(v) => setIdentityType(v as 'phone' | 'email')}
-              options={[
-                { label: '手机号', value: 'phone' },
-                { label: '邮箱', value: 'email' },
+          <Form<LoginForm>
+            layout="vertical"
+            onFinish={onFinish}
+            initialValues={{ identity_type: 'phone' }}
+          >
+            <Form.Item label="登录方式">
+              <Segmented
+                block
+                value={identityType}
+                onChange={(v) => setIdentityType(v as 'phone' | 'email')}
+                options={[
+                  { label: '手机号', value: 'phone' },
+                  { label: '邮箱', value: 'email' },
+                ]}
+              />
+            </Form.Item>
+
+            <Form.Item
+              name="identifier"
+              label={identityType === 'phone' ? '手机号' : '邮箱'}
+              rules={[
+                { required: true, message: '请输入账号' },
+                identityType === 'email'
+                  ? { type: 'email', message: '邮箱格式不正确' }
+                  : {},
               ]}
-            />
-          </Form.Item>
-
-          <Form.Item
-            name="identifier"
-            label={identityType === 'phone' ? '手机号' : '邮箱'}
-            rules={[
-              { required: true, message: '请输入账号' },
-              identityType === 'email'
-                ? { type: 'email', message: '邮箱格式不正确' }
-                : {},
-            ]}
-          >
-            <Input
-              size="large"
-              prefix={<UserOutlined />}
-              placeholder={
-                identityType === 'phone' ? '请输入手机号' : '请输入邮箱'
-              }
-              autoComplete="username"
-            />
-          </Form.Item>
-
-          <Form.Item
-            name="password"
-            label="密码"
-            rules={[{ required: true, message: '请输入密码' }]}
-          >
-            <Input.Password
-              size="large"
-              prefix={<LockOutlined />}
-              placeholder="请输入密码"
-              autoComplete="current-password"
-            />
-          </Form.Item>
-
-          <Form.Item>
-            <Button
-              type="primary"
-              htmlType="submit"
-              size="large"
-              block
-              loading={submitting}
             >
-              登 录
-            </Button>
-          </Form.Item>
+              <Input
+                size="large"
+                prefix={<UserOutlined />}
+                placeholder={
+                  identityType === 'phone' ? '请输入手机号' : '请输入邮箱'
+                }
+                autoComplete="username"
+              />
+            </Form.Item>
 
-          <div style={{ textAlign: 'center' }}>
-            <Text type="secondary">还没有账号？</Text>
-            <Link href="/register" style={{ marginLeft: 4 }}>
-              立即注册
-            </Link>
-          </div>
-        </Form>
-      </Card>
+            <Form.Item
+              name="password"
+              label="密码"
+              rules={[{ required: true, message: '请输入密码' }]}
+            >
+              <Input.Password
+                size="large"
+                prefix={<LockOutlined />}
+                placeholder="请输入密码"
+                autoComplete="current-password"
+              />
+            </Form.Item>
+
+            <Form.Item>
+              <Button
+                type="primary"
+                htmlType="submit"
+                size="large"
+                block
+                loading={submitting}
+              >
+                登 录
+              </Button>
+            </Form.Item>
+
+            <div style={{ textAlign: 'center' }}>
+              <Text type="secondary">还没有账号？</Text>
+              <Link href="/register" style={{ marginLeft: 4 }}>
+                立即注册
+              </Link>
+            </div>
+          </Form>
+        </Card>
+      </div>
     </div>
   );
 };
