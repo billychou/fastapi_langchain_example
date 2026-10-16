@@ -27,7 +27,15 @@ import {
   UnorderedListOutlined,
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
-import { Avatar, Dropdown, Layout, Menu, Space, Typography } from 'antd';
+import {
+  Avatar,
+  ConfigProvider,
+  Dropdown,
+  Layout,
+  Menu,
+  Space,
+  Typography,
+} from 'antd';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
@@ -180,73 +188,75 @@ const PlatformLayout: React.FC<React.PropsWithChildren> = ({ children }) => {
   );
 
   return (
-    <Layout style={{ minHeight: '100vh', background: 'var(--platform-bg)' }}>
-      <Sider
-        width={232}
-        theme="light"
-        style={{
-          background: '#fbfbfe',
-          borderRight: '1px solid #ececf3',
-          position: 'sticky',
-          top: 0,
-          height: '100vh',
-          overflow: 'auto',
-        }}
-      >
-        <div style={{ padding: '20px 20px 12px' }}>
-          <Title
-            level={4}
-            style={{ color: BRAND_COLOR, margin: 0, fontWeight: 700 }}
-          >
-            AI运维智能平台
-          </Title>
-        </div>
-        <Menu
-          mode="inline"
-          selectedKeys={[pathname]}
-          openKeys={openKeys}
-          onOpenChange={(keys) => setOpenKeys(keys as string[])}
-          items={menuItems}
-          onClick={({ key }) => {
-            if (key.startsWith('/')) router.push(key);
-          }}
-          style={{ borderInlineEnd: 'none', background: 'transparent' }}
-        />
-      </Sider>
-      <Layout style={{ background: 'transparent' }}>
-        <Header
+    <ConfigProvider theme={{ token: { colorPrimary: BRAND_COLOR } }}>
+      <Layout style={{ minHeight: '100vh', background: 'var(--platform-bg)' }}>
+        <Sider
+          width={232}
+          theme="light"
           style={{
-            background: 'transparent',
-            padding: '0 24px',
-            height: 64,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'flex-end',
+            background: '#fbfbfe',
+            borderRight: '1px solid #ececf3',
+            position: 'sticky',
+            top: 0,
+            height: '100vh',
+            overflow: 'auto',
           }}
         >
-          <Dropdown
-            trigger={['click']}
-            menu={{
-              items: accountMenu,
-              onClick: ({ key }) => {
-                if (key === 'logout')
-                  void logout().then(() => router.replace('/login'));
-              },
+          <div style={{ padding: '20px 20px 12px' }}>
+            <Title
+              level={4}
+              style={{ color: BRAND_COLOR, margin: 0, fontWeight: 700 }}
+            >
+              AI运维智能平台
+            </Title>
+          </div>
+          <Menu
+            mode="inline"
+            selectedKeys={[pathname]}
+            openKeys={openKeys}
+            onOpenChange={(keys) => setOpenKeys(keys as string[])}
+            items={menuItems}
+            onClick={({ key }) => {
+              if (key.startsWith('/')) router.push(key);
+            }}
+            style={{ borderInlineEnd: 'none', background: 'transparent' }}
+          />
+        </Sider>
+        <Layout style={{ background: 'transparent' }}>
+          <Header
+            style={{
+              background: 'transparent',
+              padding: '0 24px',
+              height: 64,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'flex-end',
             }}
           >
-            <Space style={{ cursor: 'pointer' }}>
-              <Avatar
-                style={{ background: BRAND_COLOR }}
-                src={user?.avatar_url || undefined}
-              >
-                {user?.nickname?.slice(0, 1) || '游'}
-              </Avatar>
-            </Space>
-          </Dropdown>
-        </Header>
-        <Content style={{ padding: '0 24px 24px' }}>{children}</Content>
+            <Dropdown
+              trigger={['click']}
+              menu={{
+                items: accountMenu,
+                onClick: ({ key }) => {
+                  if (key === 'logout')
+                    void logout().then(() => router.replace('/login'));
+                },
+              }}
+            >
+              <Space style={{ cursor: 'pointer' }}>
+                <Avatar
+                  style={{ background: BRAND_COLOR }}
+                  src={user?.avatar_url || undefined}
+                >
+                  {user?.nickname?.slice(0, 1) || '游'}
+                </Avatar>
+              </Space>
+            </Dropdown>
+          </Header>
+          <Content style={{ padding: '0 24px 24px' }}>{children}</Content>
+        </Layout>
       </Layout>
-    </Layout>
+    </ConfigProvider>
   );
 };
 
