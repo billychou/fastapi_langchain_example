@@ -15,13 +15,26 @@ import locale from './local';
 
 // ==================== Type ====================
 // 后端 SSE 中 `agent` 字段携带的工具链事件(见 backend/app/api/chat.py)
-export interface AgentEvent {
+/** 工具链事件(既有): 按 tool_call id 配对 loading → success。 */
+export interface ToolChainEvent {
   type: 'tool_call' | 'tool_result';
   id: string;
   name: string;
   args?: Record<string, unknown>;
   result?: string;
 }
+
+/** 多智能体调度事件: 总管 handoff 到执行智能体 / 执行智能体返回。 */
+export interface DispatchEvent {
+  type: 'agent_dispatch' | 'agent_return';
+  agent_key: string;
+  name: string;
+  task?: string;
+  /** agent_return: success / error */
+  status?: string;
+}
+
+export type AgentEvent = ToolChainEvent | DispatchEvent;
 
 export interface ChatMessage extends XModelMessage {
   extraInfo?: {

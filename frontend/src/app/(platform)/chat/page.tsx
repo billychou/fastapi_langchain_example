@@ -3,6 +3,7 @@
 import {
   ApiOutlined,
   CloudUploadOutlined,
+  ClusterOutlined,
   DeleteOutlined,
   EditOutlined,
   EllipsisOutlined,
@@ -321,36 +322,91 @@ const getRole = (className: string): BubbleListProps['role'] => ({
           />
         ) : null;
       }
-      // 按工具调用 id 合并: tool_call → loading, 对应 tool_result 到达 → success
-      const steps = new Map<
-        string,
-        { name: string; status: 'loading' | 'success'; result?: string }
-      >();
+      // 按事件到达顺序合并节点: tool_call / agent_dispatch → loading,
+      // 对应 tool_result / agent_return 到达 → success; 调度事件渲染成
+      // 「调度 → <智能体名>」节点, 展示总管多智能体调度链。
+      type ChainNode =
+        | {
+            kind: 'dispatch';
+            name: string;
+            task?: string;
+            status: 'loading' | 'success' | 'error';
+          }
+        | {
+            kind: 'tool';
+            name: string;
+            status: 'loading' | 'success';
+            result?: string;
+          };
+      const nodes = new Map<string, ChainNode>();
       for (const event of agentEvents) {
-        if (event.type === 'tool_call') {
-          steps.set(event.id, { name: event.name, status: 'loading' });
-        } else {
-          const pending = steps.get(event.id);
-          steps.set(event.id, {
-            name: event.name || pending?.name || '',
+        if (event.type === 'agent_dispatch') {
+          nodes.set(`dispatch:${event.agent_key}`, {
+            kind: 'dispatch',
+            name: event.name,
+            task: event.task,
+            status: 'loading',
+          });
+        } else if (event.type === 'agent_return') {
+          const key = `dispatch:${event.agent_key}`;
+          const pending = nodes.get(key);
+          nodes.set(key, {
+            kind: 'dispatch',
+            name:
+              event.name ||
+              (pending?.kind === 'dispatch' ? pending.name : '') ||
+              event.agent_key,
+            task:
+              event.task ??
+              (pending?.kind === 'dispatch' ? pending.task : undefined),
+            status: event.status === 'error' ? 'error' : 'success',
+          });
+        } else if (event.type === 'tool_call') {
+          nodes.set(`tool:${event.id}`, {
+            kind: 'tool',
+            name: event.name,
+            status: 'loading',
+          });
+        } else if (event.type === 'tool_result') {
+          const key = `tool:${event.id}`;
+          const pending = nodes.get(key);
+          nodes.set(key, {
+            kind: 'tool',
+            name: event.name || (pending?.kind === 'tool' ? pending.name : ''),
             status: 'success',
             result: event.result,
           });
         }
       }
-      const items: ThoughtChainItemType[] = [...steps.entries()].map(
-        ([id, step]) => ({
-          key: `tool-${id}`,
-          icon: <ApiOutlined />,
-          title: step.name,
-          description:
-            step.status === 'success'
-              ? locale.toolReturned
-              : locale.toolExecuting,
-          status: step.status,
-          collapsible: !!step.result,
-          content: step.result,
-        }),
+      const items: ThoughtChainItemType[] = [...nodes.entries()].map(
+        ([id, node]) =>
+          node.kind === 'dispatch'
+            ? {
+                key: id,
+                icon: <ClusterOutlined />,
+                title: `调度 → ${node.name}`,
+                description:
+                  node.status === 'loading'
+                    ? locale.dispatchExecuting
+                    : node.status === 'error'
+                      ? locale.dispatchFailed
+                      : locale.dispatchReturned,
+                status: node.status,
+                collapsible: !!node.task,
+                content: node.task,
+              }
+            : {
+                key: id,
+                icon: <ApiOutlined />,
+                title: node.name,
+                description:
+                  node.status === 'success'
+                    ? locale.toolReturned
+                    : locale.toolExecuting,
+                status: node.status,
+                collapsible: !!node.result,
+                content: node.result,
+              },
       );
       items.push({
         key: 'model-status',
