@@ -1,8 +1,12 @@
-"""Demo tools available to the agent.
+"""Local tool catalogue available to the agent.
 
 Each tool is a plain Python function decorated with `@tool` — the docstring
 is sent to the LLM as the tool description, so keep it accurate.
-Replace or extend these with real integrations as needed.
+
+`ALL_TOOLS` is the single source of truth for the platform's "本地工具" catalogue:
+it backs the agent registry's `tool_refs` validation (`/api/v1/agents/catalog`)
+and the runtime tool binding. Ops connectors (Prometheus / Loki / Kubernetes)
+live in `app/tools_ops.py` and are merged in at the bottom.
 """
 
 import ast
@@ -10,6 +14,8 @@ import operator
 from datetime import datetime, timedelta, timezone
 
 from langchain.tools import tool
+
+from app.tools_ops import OPS_TOOLS
 
 # ---------------------------------------------------------------------------
 # Safe arithmetic evaluation for the calculator tool
@@ -78,4 +84,5 @@ def get_weather(city: str) -> str:
     return f"{city}：晴转多云，25°C，微风（演示数据）"
 
 
-ALL_TOOLS = [get_current_time, calculate, get_weather]
+#: 本地工具目录: 演示工具 + 运维连接器(Prometheus / Loki / Kubernetes)。
+ALL_TOOLS = [get_current_time, calculate, get_weather, *OPS_TOOLS]

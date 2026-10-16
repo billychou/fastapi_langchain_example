@@ -22,12 +22,13 @@ dependencies = [
     "langgraph-checkpoint-sqlite>=3.1.1",
     "langgraph-checkpoint-postgres>=3.1.2",
     "psycopg[binary]>=3.1",
+    # 运维连接器直连 Prometheus / Loki / K8s API(app/tools_ops.py)
+    "httpx>=0.27",
     "alembic>=1.19.1",
 ]
 
 [dependency-groups]
 dev = [
-    "httpx>=0.27",
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
     "ruff>=0.8",

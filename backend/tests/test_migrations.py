@@ -478,6 +478,24 @@ def test_agents_migration_seeds_the_six_launch_agents():
         assert key in inserts[0], f"{key} 未写入智能体种子"
 
 
+def test_agent_seed_refs_point_at_real_tools_and_skills():
+    """种子智能体引用的本地工具/技能必须真实存在于目录里。
+
+    refs 就是能力清单: 引用一个不存在的工具名, 管理 API 侧会 422, 运行时侧会静默
+    丢能力(工具解析取 refs ∩ 目录), 两头都难排查 —— 所以在这里把种子和目录对齐。
+    """
+    from app.skills import scan_skills
+    from app.tools import ALL_TOOLS
+
+    module = _script().get_revision(HEAD_REVISION).module
+    known_tools = {tool.name for tool in ALL_TOOLS}
+    known_skills = set(scan_skills(BACKEND_DIR / "skills").skills)
+
+    for seed in module.SEED_AGENTS:
+        assert set(seed["tool_refs"]) <= known_tools, f"{seed['agent_key']} 引用了不存在的工具"
+        assert set(seed["skill_refs"]) <= known_skills, f"{seed['agent_key']} 引用了不存在的技能"
+
+
 def test_agents_migration_downgrade_drops_everything_it_created():
     """downgrade 干净回滚: 清种子行 + 删权限点 + drop 表。"""
     recorder = _run(HEAD_REVISION, "downgrade")
