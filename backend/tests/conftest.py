@@ -15,6 +15,20 @@ import os
 import tempfile
 from pathlib import Path
 
+from sqlalchemy import BigInteger
+from sqlalchemy.ext.compiler import compiles
+
+
+@compiles(BigInteger, "sqlite")
+def _sqlite_bigint_as_integer(type_, compiler, **kw):  # noqa: ANN001, ARG001
+    """SQLite 只把 ``INTEGER PRIMARY KEY`` 当 rowid 别名。
+
+    模型主键统一 ``BigInteger``(对齐 MySQL BIGINT); 测试内存库/文件库 ``create_all``
+    时不编译成 INTEGER 就会得到不能自增的 BIGINT 主键, 插入必报
+    ``NOT NULL constraint failed: xxx.id``。放 conftest 全局注册, 不依赖导入顺序。
+    """
+    return "INTEGER"
+
 
 def _b64_32(seed: str) -> str:
     """确定性的 32 字节 base64 密钥(仅测试用)。"""

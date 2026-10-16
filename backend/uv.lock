@@ -154,6 +154,7 @@ dependencies = [
     { name = "cryptography" },
     { name = "email-validator" },
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "langchain" },
     { name = "langchain-anthropic" },
     { name = "langchain-openai" },
@@ -172,7 +173,6 @@ dependencies = [
 dev = [
     { name = "aiosqlite" },
     { name = "fakeredis", extra = ["lua"] },
-    { name = "httpx" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "ruff" },
@@ -186,6 +186,7 @@ requires-dist = [
     { name = "cryptography", specifier = ">=43.0" },
     { name = "email-validator", specifier = ">=2.1" },
     { name = "fastapi", specifier = ">=0.115" },
+    { name = "httpx", specifier = ">=0.27" },
     { name = "langchain", specifier = ">=1.0" },
     { name = "langchain-anthropic", specifier = ">=1.0" },
     { name = "langchain-openai", specifier = ">=1.0" },
@@ -204,7 +205,6 @@ requires-dist = [
 dev = [
     { name = "aiosqlite", specifier = ">=0.20" },
     { name = "fakeredis", extras = ["lua"], specifier = ">=2.26" },
-    { name = "httpx", specifier = ">=0.27" },
     { name = "pytest", specifier = ">=8.3" },
     { name = "pytest-asyncio", specifier = ">=0.24" },
     { name = "ruff", specifier = ">=0.8" },

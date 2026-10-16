@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 
 from langchain.agents.middleware import AgentMiddleware, ModelRequest, ToolCallRequest
 from langchain_core.messages import SystemMessage, ToolMessage
@@ -31,17 +32,37 @@ def _scope(context: object) -> ChatContext:
 
 
 class SkillMiddleware(AgentMiddleware[None, ChatContext]):
-    """按调用者身份渲染技能目录并收敛技能工具的可见性。"""
+    """按调用者身份渲染技能目录并收敛技能工具的可见性。
 
-    def __init__(self, registry: SkillRegistry | None = None) -> None:
+    ``allowed`` 是**智能体级**的技能白名单(注册表 ``skill_refs``): 多智能体运行时里
+    每个执行智能体只应看到自己绑定的技能, 而不是全平台目录。``None`` 表示不额外过滤
+    (沿用「调用者可见即全部可见」的老行为), 因此既有调用方零改动。
+    """
+
+    def __init__(
+        self,
+        registry: SkillRegistry | None = None,
+        *,
+        allowed: Iterable[str] | None = None,
+    ) -> None:
         self.registry = registry or get_skill_registry()
+        self.allowed: frozenset[str] | None = (
+            frozenset(allowed) if allowed is not None else None
+        )
+
+    def visible_for(self, scope: ChatContext) -> list:
+        """调用者可见 ∩ 智能体绑定; ``allowed=None`` 时即调用者可见全集。"""
+        visible = self.registry.visible_to(
+            permissions=scope.permissions, authenticated=scope.authenticated
+        )
+        if self.allowed is not None:
+            visible = [item for item in visible if item.name in self.allowed]
+        return visible
 
     async def awrap_model_call(self, request: ModelRequest, handler):
         # registry.enabled=False 时 visible_to 直接返回空, 技能工具同样会被摘掉
         scope = _scope(request.runtime.context)
-        visible = self.registry.visible_to(
-            permissions=scope.permissions, authenticated=scope.authenticated
-        )
+        visible = self.visible_for(scope)
         catalog = self.registry.render_catalog(visible)
         tools = request.tools
         if not visible:
@@ -59,10 +80,7 @@ class SkillMiddleware(AgentMiddleware[None, ChatContext]):
         tool_call = request.tool_call
         if tool_call.get("name") in SKILL_TOOL_NAMES:
             scope = _scope(request.runtime.context)
-            visible = self.registry.visible_to(
-                permissions=scope.permissions, authenticated=scope.authenticated
-            )
-            if not visible:
+            if not self.visible_for(scope):
                 logger.warning(
                     "skill tool call blocked (no visible skills) account_id=%s tool=%s",
                     scope.account_id,

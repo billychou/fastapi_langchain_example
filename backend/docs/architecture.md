@@ -123,3 +123,20 @@ sequenceDiagram
 | 修改密码 | 更新 Argon2id 哈希 + 撤销全部会话 | 即时, 强制重新登录 |
 | 单端互踢登录 | 新会话创建后删除其余 sid | 即时(strict_session_check) |
 | 角色变更 | 删除 auth:rbac:{uid} 缓存 | ≤ 缓存 TTL 生效 |
+
+## 5. 多智能体调度与 SSE 事件(平台第一期)
+
+用户/权限服务之外, 后端还是 AI 运维智能平台的多智能体运行时: 智能体注册表
+(MySQL `agent` 表, 迁移 `e7f9a3b5c1d6` / `migrations/006_agents.sql`, RBAC
+`agent:read` / `agent:write`) + supervisor→executor 调度(handoff-as-tools)。
+模型与 API 全表见 `docs/aiops-platform-design.md` §2–§5, 此处只记与鉴权/会话的交界:
+
+- `POST /api/chat` 仍沿用本章的 Access Token 鉴权与限流; 调度身份(`AuthContext`)
+  经 `ChatContext` 传入运行时, 技能可见性与审计日志复用本章的 RBAC/审计设施
+  (智能体写操作落 `agent_create/agent_update/agent_status/agent_delete` 审计)。
+- 调度时序: supervisor 决定 `call_<agent_key>(task)` → 路由先发
+  `agent` SSE 事件 `agent_dispatch{agent_key,name,task}` → handoff 工具内跑 executor
+  子图(token 经 custom lane `executor_text` 转发, 父图 messages lane 在 handoff 期间
+  被抑制以免重复正文) → `agent_return{...,status}` → supervisor 汇总收尾。
+- 启停/增删智能体调用 `invalidate_runtime()`, 下一次请求即按新注册表重建运行时;
+  暂停的 executor 不生成 handoff 工具, `supervisor_main` 禁删禁停(HTTP 409)。

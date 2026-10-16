@@ -328,3 +328,94 @@ export const threadApi = {
       method: 'GET',
     }),
 };
+
+// ---------------- 智能体注册表 (agent) ----------------
+export type AgentRole = 'supervisor' | 'executor';
+export type AgentStatus = 'active' | 'paused';
+
+export interface AgentCounts {
+  local: number;
+  mcp: number;
+  rag: number;
+  skills: number;
+}
+
+export interface AgentSummary {
+  agent_key: string;
+  name: string;
+  role: AgentRole;
+  status: AgentStatus;
+  description: string;
+  counts: AgentCounts;
+}
+
+export interface AgentDetail extends AgentSummary {
+  system_prompt: string;
+  tool_refs: string[];
+  skill_refs: string[];
+  mcp_refs: string[];
+  rag_refs: string[];
+  sort_order: number;
+}
+
+export interface AgentCatalogOption {
+  name: string;
+  description: string;
+}
+
+/** 新建/编辑表单目录: 本地工具全量 + 当前调用者可见技能。 */
+export interface AgentCatalog {
+  tools: AgentCatalogOption[];
+  skills: AgentCatalogOption[];
+}
+
+export interface AgentCreateParams {
+  agent_key: string;
+  name: string;
+  role: AgentRole;
+  description?: string;
+  system_prompt?: string;
+  tool_refs?: string[];
+  skill_refs?: string[];
+  mcp_refs?: string[];
+  rag_refs?: string[];
+}
+
+/** 编辑: role / agent_key 不可变。 */
+export type AgentUpdateParams = Partial<
+  Omit<AgentCreateParams, 'agent_key' | 'role'>
+>;
+
+export const agentApi = {
+  list: (params: { search?: string; status?: AgentStatus } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.search) qs.set('search', params.search);
+    if (params.status) qs.set('status', params.status);
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    return request<{ count: number; items: AgentSummary[] }>(
+      `/api/v1/agents${suffix}`,
+      { method: 'GET' },
+    );
+  },
+  catalog: () =>
+    request<AgentCatalog>('/api/v1/agents/catalog', { method: 'GET' }),
+  create: (params: AgentCreateParams) =>
+    request<AgentDetail>('/api/v1/agents', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    }),
+  get: (agentKey: string) =>
+    request<AgentDetail>(`/api/v1/agents/${agentKey}`, { method: 'GET' }),
+  update: (agentKey: string, params: AgentUpdateParams) =>
+    request<AgentDetail>(`/api/v1/agents/${agentKey}`, {
+      method: 'PATCH',
+      body: JSON.stringify(params),
+    }),
+  setStatus: (agentKey: string, status: AgentStatus) =>
+    request<AgentDetail>(`/api/v1/agents/${agentKey}/status`, {
+      method: 'POST',
+      body: JSON.stringify({ status }),
+    }),
+  remove: (agentKey: string) =>
+    request<null>(`/api/v1/agents/${agentKey}`, { method: 'DELETE' }),
+};

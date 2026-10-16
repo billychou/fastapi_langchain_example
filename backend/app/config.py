@@ -93,6 +93,19 @@ class Settings(BaseSettings):
     rl_chat_refill_per_min: float = 6.0  # 聊天令牌桶每分钟恢复速率
     trusted_proxy_hops: int = 0  # 可信代理跳数: >0 时按 X-Forwarded-For 从右向左取客户端 IP
 
+    # ================= 运维连接器(Prometheus / Loki / Kubernetes) =================
+    # 三个 URL 全为空即「未接入」: 连接器工具返回带 source="mock" 的演示数据,
+    # 无凭证也能跑通智能体链路(与 MockChatModel 同一哲学)。详见 app/tools_ops.py。
+    prometheus_url: str = ""  # 例: http://prometheus:9090
+    prometheus_token: str = ""  # 可选 Bearer Token(反代 / 云托管 Prometheus)
+    loki_url: str = ""  # 例: http://loki:3100
+    loki_token: str = ""  # 可选 Bearer Token
+    k8s_api_url: str = ""  # 例: https://kubernetes.default.svc
+    k8s_api_token: str = ""  # ServiceAccount Token; 空则不带 Authorization 头
+    k8s_verify_tls: bool = True  # 集群自签证书且未挂 CA 时可置 false
+    ops_timeout_seconds: float = 5.0  # 单次连接器请求超时(秒)
+    ops_mock_fallback: bool = True  # 端点缺失/调用失败时回退演示数据; 生产建议 false
+
     # ================= MySQL =================
     database_url: str = (
         "mysql+aiomysql://auth_user:CHANGE_ME@127.0.0.1:3306/auth_service?charset=utf8mb4"
