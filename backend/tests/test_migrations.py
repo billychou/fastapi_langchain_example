@@ -2,7 +2,7 @@
 
 守卫四件事(每一条都对应过真实的回归):
 
-1. **链不断不分叉**: 单 head, 且顺序是 初始 schema → 技能权限 → 学习内核表。
+1. **链不断不分叉**: 单 head, 且顺序是 初始 schema → 技能权限 → 学习内核表 → 智能体注册表。
 2. **两条建库路径等价**: 新建库走 ``migrations/*.sql``(004 直接 stamp 到 head, 不重放
    迁移), 既有库走 ``alembic upgrade head`` —— 所以每条数据迁移的种子必须同样出现在
    initdb SQL 里, 每条 DDL 迁移的表结构必须与 ``Base.metadata`` 逐列一致。
@@ -21,9 +21,11 @@ MIGRATIONS_DIR = BACKEND_DIR / "migrations"
 
 INITIAL_REVISION = "409a7d6da51e"
 SKILL_REVISION = "9c4a1f7b2d65"
-HEAD_REVISION = "f3a9c1d47b60"
+LEARNING_REVISION = "f3a9c1d47b60"
+HEAD_REVISION = "e7f9a3b5c1d6"
 SEED_SQL = MIGRATIONS_DIR / "002_seed_rbac.sql"
 LEARNING_SQL = MIGRATIONS_DIR / "005_learning.sql"
+AGENTS_SQL = MIGRATIONS_DIR / "006_agents.sql"
 
 #: 学习内核新增的五张表(顺序 = 建表顺序 = 外键依赖顺序)。
 LEARNING_TABLES = (
@@ -33,6 +35,23 @@ LEARNING_TABLES = (
     "learner_explanation",
     "mastery_ledger",
 )
+
+#: 智能体注册表新增的一张表。
+AGENT_TABLES = ("agent",)
+
+AGENT_PERMISSIONS = {
+    "agent:read",
+    "agent:write",
+}
+
+AGENT_SEED_KEYS = {
+    "supervisor_main",
+    "k8s-agent",
+    "edu-agent",
+    "rag-agent",
+    "metric-agent",
+    "log-agent",
+}
 
 LEARNING_PERMISSIONS = {
     "learning:self:read",
@@ -55,6 +74,7 @@ _EXPECTED_TABLES = {
     "login_log",
     "audit_log",
     *LEARNING_TABLES,
+    *AGENT_TABLES,
 }
 
 
@@ -188,6 +208,7 @@ def test_migration_chain_is_linear():
     """链是 初始 schema → 技能权限 → 学习内核表: 断链或分叉都会让老库升级失败。"""
     assert [revision.revision for revision in _chain()] == [
         HEAD_REVISION,
+        LEARNING_REVISION,
         SKILL_REVISION,
         INITIAL_REVISION,
     ]
@@ -205,22 +226,22 @@ def test_skill_permission_migration_chains_onto_initial_schema():
 
 def test_learning_migration_chains_onto_skill_permissions():
     """学习内核表挂在技能权限之后, 且创建的就是那五张表(多一张少一张都算漂移)。"""
-    revision = _script().get_revision(HEAD_REVISION)
+    revision = _script().get_revision(LEARNING_REVISION)
     assert revision.down_revision == SKILL_REVISION
     assert revision.module.TABLES == LEARNING_TABLES
-    recorder = _run(HEAD_REVISION, "upgrade")
+    recorder = _run(LEARNING_REVISION, "upgrade")
     assert tuple(recorder.tables) == LEARNING_TABLES
 
 
 def test_learning_migration_seeds_documented_permissions():
     """权限点与授权关系是产品口径: member 自助读写, operator 读报告, admin 走通配 *。"""
-    module = _script().get_revision(HEAD_REVISION).module
+    module = _script().get_revision(LEARNING_REVISION).module
     assert {code for code, *_ in module.PERMISSIONS} == LEARNING_PERMISSIONS
     assert module.GRANTS == {
         "member": ("learning:self:read", "learning:explanation:write"),
         "operator": ("learning:report:read",),
     }
-    recorder = _run(HEAD_REVISION, "upgrade")
+    recorder = _run(LEARNING_REVISION, "upgrade")
     seeded = [sql for sql in recorder.executed if "INSERT IGNORE INTO `permission`" in sql]
     assert len(seeded) == len(LEARNING_PERMISSIONS)
     granted = [sql for sql in recorder.executed if "`role_permission`" in sql]
@@ -229,7 +250,7 @@ def test_learning_migration_seeds_documented_permissions():
 
 def test_learning_migration_downgrade_drops_everything_it_created():
     """downgrade 要能干净回滚: 倒序 drop 五张表 + 删掉自己种下的权限点。"""
-    recorder = _run(HEAD_REVISION, "downgrade")
+    recorder = _run(LEARNING_REVISION, "downgrade")
     assert recorder.dropped == list(reversed(LEARNING_TABLES))
     deletes = [sql for sql in recorder.executed if sql.startswith("DELETE")]
     assert len(deletes) == 2
@@ -241,7 +262,7 @@ def test_bigint_id_type_reads_the_referenced_column():
     """``_bigint_id_type()`` 必须读真实类型: MySQL 外键要求两侧含 UNSIGNED 完全一致。"""
     import sqlalchemy as sa
 
-    module = _load(HEAD_REVISION)
+    module = _load(LEARNING_REVISION)
     engine = sa.create_engine("sqlite://")
     sa.Table(
         "account",
@@ -281,7 +302,11 @@ def test_initdb_stamp_matches_alembic_head():
 def test_data_migration_seeds_are_also_in_initdb_sql():
     """新建库不重放迁移(直接 stamp 到 head), 所以数据迁移的种子必须同样写进初始 SQL。"""
     seeded = [revision for revision in _chain() if hasattr(revision.module, "PERMISSIONS")]
-    assert {revision.revision for revision in seeded} == {SKILL_REVISION, HEAD_REVISION}
+    assert {revision.revision for revision in seeded} == {
+        SKILL_REVISION,
+        LEARNING_REVISION,
+        HEAD_REVISION,
+    }
     for revision in seeded:
         module = revision.module
         seed_path = MIGRATIONS_DIR / module.INITDB_SEED_SQL
@@ -348,7 +373,7 @@ def test_learning_migration_ddl_matches_models():
     import sqlalchemy as sa
     from app.db.session import Base
 
-    recorder = _run(HEAD_REVISION, "upgrade")
+    recorder = _run(LEARNING_REVISION, "upgrade")
     for table in LEARNING_TABLES:
         model = Base.metadata.tables[table]
         call = recorder.tables[table]
@@ -389,7 +414,7 @@ def test_learning_migration_declares_foreign_keys():
     """外键是级联清理与图完整性的来源, 迁移里必须逐条声明(名字由 MySQL 生成)。"""
     import sqlalchemy as sa
 
-    recorder = _run(HEAD_REVISION, "upgrade")
+    recorder = _run(LEARNING_REVISION, "upgrade")
     specs: dict[str, set[tuple[str, str]]] = {}
     for table, call in recorder.tables.items():
         specs[table] = {
@@ -415,3 +440,109 @@ def test_learning_migration_declares_foreign_keys():
         for arg in recorder.tables[table]["args"]:
             if isinstance(arg, sa.ForeignKeyConstraint):
                 assert arg.ondelete == "CASCADE", f"{table} 的外键必须级联删除"
+
+
+# --------------------------------------------------------------------------- 智能体注册表
+
+
+def test_agents_migration_chains_onto_learning_tables():
+    """智能体注册表挂在学习内核表之后, 且只建 agent 一张表。"""
+    revision = _script().get_revision(HEAD_REVISION)
+    assert revision.down_revision == LEARNING_REVISION
+    assert revision.module.TABLES == AGENT_TABLES
+    recorder = _run(HEAD_REVISION, "upgrade")
+    assert tuple(recorder.tables) == AGENT_TABLES
+
+
+def test_agents_migration_seeds_documented_permissions():
+    """权限口径: 全部角色可读, operator 可管理, admin 走通配 *。"""
+    module = _script().get_revision(HEAD_REVISION).module
+    assert {code for code, *_ in module.PERMISSIONS} == AGENT_PERMISSIONS
+    assert module.GRANTS == {
+        "member": ("agent:read",),
+        "operator": ("agent:read", "agent:write"),
+    }
+    recorder = _run(HEAD_REVISION, "upgrade")
+    seeded = [sql for sql in recorder.executed if "INSERT IGNORE INTO `permission`" in sql]
+    assert len(seeded) == len(AGENT_PERMISSIONS)
+    granted = [sql for sql in recorder.executed if "`role_permission`" in sql]
+    assert len(granted) == len(module.GRANTS)
+
+
+def test_agents_migration_seeds_the_six_launch_agents():
+    """平台首屏六个智能体是产品口径: 少一个种子, 新建库的首屏就缺一块。"""
+    recorder = _run(HEAD_REVISION, "upgrade")
+    inserts = [sql for sql in recorder.executed if "INSERT IGNORE INTO `agent`" in sql]
+    assert len(inserts) == 1
+    for key in AGENT_SEED_KEYS:
+        assert key in inserts[0], f"{key} 未写入智能体种子"
+
+
+def test_agents_migration_downgrade_drops_everything_it_created():
+    """downgrade 干净回滚: 清种子行 + 删权限点 + drop 表。"""
+    recorder = _run(HEAD_REVISION, "downgrade")
+    assert recorder.dropped == list(reversed(AGENT_TABLES))
+    deletes = [sql for sql in recorder.executed if sql.startswith("DELETE")]
+    assert len(deletes) == 3
+    for code in AGENT_PERMISSIONS:
+        assert code in deletes[-1], f"{code} 未在 downgrade 中清理"
+
+
+def test_agents_migration_ddl_matches_models():
+    """agent 表迁移 DDL 与模型逐列一致(两条建库路径等价的守卫)。"""
+    import app.models  # noqa: F401
+    import sqlalchemy as sa
+    from app.db.session import Base
+
+    recorder = _run(HEAD_REVISION, "upgrade")
+    for table in AGENT_TABLES:
+        model = Base.metadata.tables[table]
+        call = recorder.tables[table]
+        migration_columns = _migration_columns(call)
+
+        assert set(migration_columns) == set(model.columns.keys()), f"{table} 列名不一致"
+        for name, column in model.columns.items():
+            created = migration_columns[name]
+            assert _compiled(created.type) == _compiled(column.type), f"{table}.{name} 类型不一致"
+            assert created.nullable == column.nullable, f"{table}.{name} 可空性不一致"
+            assert _default(created) == _default(column), f"{table}.{name} 服务端默认值不一致"
+
+        model_uniques = {
+            (constraint.name, _constraint_names(constraint))
+            for constraint in model.constraints
+            if isinstance(constraint, sa.UniqueConstraint)
+        }
+        migration_uniques = {
+            (arg.name, _constraint_names(arg))
+            for arg in call["args"]
+            if isinstance(arg, sa.UniqueConstraint)
+        }
+        assert migration_uniques == model_uniques, f"{table} 唯一约束不一致"
+
+        model_indexes = {
+            index.name: (tuple(column.name for column in index.columns), bool(index.unique))
+            for index in model.indexes
+        }
+        migration_indexes = {
+            name: (tuple(info["columns"]), bool(info.get("unique", False)))
+            for name, info in recorder.indexes.items()
+            if info["table"] == table
+        }
+        assert migration_indexes == model_indexes, f"{table} 索引不一致"
+
+
+def test_initdb_agents_sql_declares_every_model_column():
+    """006_agents.sql 与模型逐列一致, 且六个种子智能体都在。"""
+    import app.models  # noqa: F401
+    from app.db.session import Base
+
+    sql_tables = _sql_tables(AGENTS_SQL)
+    assert set(sql_tables) == set(AGENT_TABLES)
+    for table in AGENT_TABLES:
+        model_columns = set(Base.metadata.tables[table].columns.keys())
+        assert sql_tables[table] == model_columns, f"{table} 的列在 SQL 与模型之间不一致"
+    seed = AGENTS_SQL.read_text(encoding="utf-8")
+    for key in AGENT_SEED_KEYS:
+        assert f"('{key}'" in seed, f"{key} 未写入 migrations/006_agents.sql"
+    for code in AGENT_PERMISSIONS:
+        assert f"('{code}'" in seed, f"{code} 未写入 migrations/006_agents.sql"
