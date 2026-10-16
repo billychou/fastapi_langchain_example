@@ -14,20 +14,12 @@ from dataclasses import dataclass
 import fakeredis.aioredis
 import httpx
 import pytest
-from sqlalchemy import BigInteger
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.ext.compiler import compiles
 
 LIST = "/api/v1/agents"
 CATALOG = "/api/v1/agents/catalog"
 
 ACCOUNTS = {"member": 1, "operator": 2, "admin": 3}
-
-
-@compiles(BigInteger, "sqlite")
-def _sqlite_bigint_as_integer(type_, compiler, **kw):  # noqa: ANN001, ARG001
-    """SQLite 只把 ``INTEGER PRIMARY KEY`` 当 rowid 别名, 否则 audit_log 插入会失败。"""
-    return "INTEGER"
 
 
 @dataclass(slots=True)

@@ -39,7 +39,7 @@ INSERT IGNORE INTO `agent` (`agent_key`, `name`, `role`, `status`, `description`
   ('supervisor_main', '调度管理者', 'supervisor', 'active',
    '总管调度智能体，拆分复杂任务、分发至执行智能体，汇总多智能体结果，生成最终回复。',
    '你是 AI 运维智能平台的总管调度智能体。职责: 1) 理解用户的运维请求; 2) 拆分任务并调用对应执行智能体; 3) 汇总各执行智能体的结果, 给出结构化的最终回复。不要自行编造监控数据, 一切以执行智能体的返回为准。',
-   '["get_current_time"]', '["expense-report"]', '[]', '[]', 0),
+   '["get_current_time"]', '["trip-planner"]', '[]', '[]', 0),
   ('k8s-agent', 'K8s 集群诊断', 'executor', 'active',
    'K8s 集群资源查询诊断智能体，获取集群资源信息，分析资源状态与异常事件。',
    '你是 K8s 集群诊断智能体。用 k8s_list_resources 获取集群资源, 结合 Prometheus 指标判断资源状态与异常事件, 输出诊断结论与处置建议。',

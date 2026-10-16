@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 # 导入期和建 agent 时都看不出来)。
 # 依赖方向依然是单向的: pedagogy 从不 import context(它靠纯函数 + 显式传参), 这里
 # 只是「上下文携带内核的数据形状」, 不构成环。
+from app.agent_events import AgentEventSink
 from app.pedagogy.events import PedagogySink
 from app.pedagogy.loop import LoopStep
 from app.pedagogy.schemas import PedagogyState
@@ -50,3 +51,8 @@ class ChatContext:
     pedagogy_step: LoopStep | None = None
     #: 本次请求的 ``learn`` 事件收集器(可变, 由路由 drain 成 SSE)。
     pedagogy_sink: PedagogySink | None = None
+    #: 主线程 ID。handoff 工具据此派生执行智能体的子线程
+    #: (``f"{thread_id}::{agent_key}"``), 教学循环等带状态子图才能跨轮存活。
+    thread_id: str = ""
+    #: 本次请求的调度事件收集器(可变, 由路由 drain 成 SSE ``agent`` 字段)。
+    agent_sink: AgentEventSink | None = None

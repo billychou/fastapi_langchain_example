@@ -166,6 +166,40 @@ def env(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Env]:
             permissions={"*"},
         )
 
+    # 多智能体化之后, 教学中间件挂在 **edu-agent 子图**上: 注册表为空会回落到
+    # 内置默认(其中 edu-agent 是 paused), 教学频道整条下线。这里把默认注册表逐行
+    # 种进 sqlite 并强制 edu-agent 为 active, 才能真的走到「注册表驱动运行时」
+    # 这条路径(其余模块的死 MySQL 走的正是回落路径, 两边都被覆盖)。
+    import asyncio
+
+    from app.agent import invalidate_runtime
+    from app.agent_registry import DEFAULT_AGENT_SPECS
+    from app.models.agent import Agent
+
+    async def _seed_agents() -> None:
+        async with factory() as session:
+            for spec in DEFAULT_AGENT_SPECS:
+                session.add(
+                    Agent(
+                        agent_key=spec.agent_key,
+                        name=spec.name,
+                        role=spec.role,
+                        status="active" if spec.agent_key == "edu-agent" else spec.status,
+                        description=spec.description,
+                        system_prompt=spec.system_prompt,
+                        tool_refs=list(spec.tool_refs),
+                        skill_refs=list(spec.skill_refs),
+                        mcp_refs=list(spec.mcp_refs),
+                        rag_refs=list(spec.rag_refs),
+                        sort_order=spec.sort_order,
+                    )
+                )
+            await session.commit()
+
+    asyncio.run(_seed_agents())
+    # 前面的测试模块可能已用回落注册表建过运行时: 丢弃, 让本模块按 sqlite 重建。
+    invalidate_runtime()
+
     from app.main import app
 
     app.dependency_overrides[get_db] = _override_db

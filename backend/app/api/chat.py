@@ -25,7 +25,8 @@ from langchain_core.messages import (
 from redis.exceptions import RedisError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agent import get_agent
+from app.agent import LEARNING_AGENT_KEY, get_runtime
+from app.agent_events import AgentEvent, AgentEventSink
 from app.config import get_settings
 from app.context import ChatContext
 from app.core.messages import message_text
@@ -48,6 +49,15 @@ router = APIRouter()
 
 def sse(payload: dict[str, Any]) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+def agent_sse(event: AgentEvent) -> str:
+    """一条调度事件(``agent_dispatch`` / ``agent_return``)。
+
+    与既有工具链 ``agent`` 事件同构(顶层平铺 + 空 ``delta``), 前端思维链据此渲染
+    「调度 → K8s 集群诊断」节点; 只读 ``delta.content`` 的老客户端自动忽略。
+    """
+    return sse({"choices": [{"delta": {}}], "agent": event.to_sse()})
 
 
 def learn_sse(event: LearnEvent) -> str:
@@ -212,13 +222,14 @@ async def chat_events(
     replacement` 携带改写后的**全文**, 由前端替换气泡内容; 只读 `delta` 的客户端
     不受任何影响。
     """
-    agent = await get_agent()
+    runtime = await get_runtime(db)
+    agent = runtime.supervisor
     config = {"configurable": {"thread_id": thread_id}}
     first_user_text = next((m.content for m in reversed(request.messages) if m.role == "user"), "")
 
-    # 教学回合装配: 读 checkpointer 的 pedagogy 频道 -> 判读学习者这句话 -> tick。
-    # 返回 None 就是普通聊天(闲聊/匿名/降级开关关闭), 下面的行为与注入前逐字一致。
-    turn = await _prepare_pedagogy(agent, ctx, thread_id, first_user_text, config)
+    # 教学回合装配: 读 **edu-agent 子图**派生线程的 pedagogy 频道 -> 判读这句话 -> tick。
+    # 返回 None 就是普通聊天(闲聊/匿名/降级开关关闭/教学智能体暂停), 行为与注入前一致。
+    turn = await _prepare_pedagogy(runtime, ctx, thread_id, first_user_text)
 
     # agent 是进程级单例, 身份/权限/教学状态只能按请求经 context 传入
     identity: dict[str, Any] = {
@@ -226,13 +237,24 @@ async def chat_events(
         "authenticated": ctx is not None,
         "permissions": frozenset(ctx.permissions) if ctx is not None else frozenset(),
     }
-    context = ChatContext(**identity, **(turn.context_kwargs if turn else {}))
+    # 调度事件收集器: handoff 工具 emit, 本循环 drain 成 SSE(与 learn 通道同手法)。
+    agent_sink = AgentEventSink()
+    context = ChatContext(
+        **identity,
+        thread_id=thread_id,
+        agent_sink=agent_sink,
+        **(turn.context_kwargs if turn else {}),
+    )
     sink = turn.sink if turn is not None else None
 
     assistant_parts: list[str] = []
     # 护栏改写过的消息会被 after_model 以「同 id 的新消息」再报一次(updates lane 的
     # 节点名变成 PedagogyMiddleware.after_model), 不去重前端就会看到两次工具调用。
     seen_events: set[str] = set()
+    # 调度窗口: 执行智能体的 token 只认 custom lane(handoff 经 stream_writer 转发)。
+    # 带 checkpointer 的子图在父图工具里运行时, 其 token/最终消息会同时渗进父图
+    # messages lane( traced 成父运行的子运行 ), 不压掉前端就会看到两段一样的正文。
+    handoff_open = False
 
     if turn is not None:
         # 调模型之前就能确定的事件先走: 学习者应该先看到「现在在哪一步」,
@@ -247,12 +269,29 @@ async def chat_events(
             {"messages": _to_langchain_messages(request.messages)},
             config=config,
             context=context,
-            stream_mode=["messages", "updates"],
+            stream_mode=["messages", "updates", "custom"],
         ):
+            # 调度事件先于本轮的 token/工具事件下发: 前端先看到「调度 → X」,
+            # 再看到该智能体的工具链与正文。
+            for event in agent_sink.drain():
+                if event.type == "agent_dispatch":
+                    handoff_open = True
+                elif event.type == "agent_return":
+                    handoff_open = False
+                yield agent_sse(event)
             if mode == "messages":
                 message_chunk, _metadata = chunk
-                if isinstance(message_chunk, AIMessageChunk):
+                if isinstance(message_chunk, AIMessageChunk) and not handoff_open:
                     text = _chunk_text(message_chunk.content)
+                    if text:
+                        assistant_parts.append(text)
+                        yield sse({"choices": [{"delta": {"content": text}}]})
+            elif mode == "custom":
+                # handoff 工具经 stream_writer 转发的执行智能体 token( pre-guard 原文),
+                # 不走 messages lane 以免与主图 token 重复; 这里补记 assistant_parts,
+                # 会话索引里才有执行智能体真正说过的话。
+                if isinstance(chunk, dict) and chunk.get("type") == "executor_text":
+                    text = chunk.get("text") or ""
                     if text:
                         assistant_parts.append(text)
                         yield sse({"choices": [{"delta": {"content": text}}]})
@@ -294,6 +333,12 @@ async def chat_events(
                 db, ctx.account_id, thread_id, first_user_text, "".join(assistant_parts)
             )
 
+    for event in agent_sink.drain():
+        if event.type == "agent_dispatch":
+            handoff_open = True
+        elif event.type == "agent_return":
+            handoff_open = False
+        yield agent_sse(event)
     if sink is not None:
         for event in sink.drain():
             yield learn_sse(event)
@@ -302,25 +347,31 @@ async def chat_events(
 
 
 async def _prepare_pedagogy(
-    agent: Any,
+    runtime: Any,
     ctx: AuthContext | None,
     thread_id: str,
     text: str,
-    config: dict[str, Any],
 ) -> PedagogyTurn | None:
     """装配本轮教学回合; 任何一步失败都退回普通聊天(``None``)。
 
-    跨轮载体存在 LangGraph checkpointer 的 ``pedagogy`` 频道里(architecture §5 的 L1
-    记忆), 所以这里要 ``aget_state`` 一次。**不新增任何存储**, 也天然按 ``thread_id``
-    隔离; 未知线程返回空快照而不抛异常(LangGraph 的行为)。
+    多智能体化之后, 跨轮载体存在 **edu-agent 子图**的 ``pedagogy`` 频道里, 线程 ID 是
+    主线程的派生值 ``f"{thread_id}::edu-agent"``(与 handoff 工具同一派生规则), 所以这里
+    要对该子图 ``aget_state`` 一次。**不新增任何存储**, 也天然按会话隔离; 未知线程返回
+    空快照而不抛异常(LangGraph 的行为)。教学智能体被暂停/删除时本函数返回 ``None``:
+    启停即时生效, 教学增强随之整体下线, 聊天本身不受影响。
 
     读频道失败一律降级为「本轮不教学」而不是 500: 状态机是可重建的辅助信息,
     账本在 MySQL, 教学增强不该把聊天本身拖下水。
     """
     if ctx is None or not get_settings().pedagogy_enabled:
         return None
+    edu = runtime.executor(LEARNING_AGENT_KEY) if runtime is not None else None
+    if edu is None:
+        return None
     try:
-        snapshot = await agent.aget_state(config)
+        snapshot = await edu.aget_state(
+            {"configurable": {"thread_id": f"{thread_id}::{LEARNING_AGENT_KEY}"}}
+        )
         raw_channel = (snapshot.values or {}).get(STATE_CHANNEL)
     except Exception:  # noqa: BLE001 - checkpointer 不可用时聊天仍要可用
         logger.warning("读取 pedagogy 频道失败, 本轮按普通聊天处理", exc_info=True)

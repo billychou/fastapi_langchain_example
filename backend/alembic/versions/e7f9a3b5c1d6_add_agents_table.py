@@ -73,7 +73,7 @@ SEED_AGENTS: tuple[dict[str, Any], ...] = (
             "不要自行编造监控数据, 一切以执行智能体的返回为准。"
         ),
         "tool_refs": ["get_current_time"],
-        "skill_refs": ["expense-report"],
+        "skill_refs": ["trip-planner"],
         "mcp_refs": [],
         "rag_refs": [],
         "sort_order": 0,

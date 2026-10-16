@@ -496,6 +496,18 @@ def test_agent_seed_refs_point_at_real_tools_and_skills():
         assert set(seed["skill_refs"]) <= known_skills, f"{seed['agent_key']} 引用了不存在的技能"
 
 
+def test_default_agent_specs_mirror_the_migration_seed():
+    """内置默认注册表是迁移种子的逐字镜像。
+
+    DB 不可达(测试/离线演示)或注册表为空时, 运行时回落到 DEFAULT_AGENT_SPECS;
+    它若与种子漂移, 「没连库的演示」与「连了库的生产」就会长出两套首屏与两套调度。
+    """
+    from app.agent_registry import DEFAULT_AGENT_SPECS, specs_to_rows_payload
+
+    module = _script().get_revision(HEAD_REVISION).module
+    assert specs_to_rows_payload(DEFAULT_AGENT_SPECS) == list(module.SEED_AGENTS)
+
+
 def test_agents_migration_downgrade_drops_everything_it_created():
     """downgrade 干净回滚: 清种子行 + 删权限点 + drop 表。"""
     recorder = _run(HEAD_REVISION, "downgrade")

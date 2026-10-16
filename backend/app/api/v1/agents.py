@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agent import invalidate_runtime
 from app.core.net import resolve_client_ip
 from app.db.session import get_db
 from app.deps import AuthContext, require_permissions
@@ -185,6 +186,7 @@ async def create_agent(
     await _audit(db, request, ctx, "agent_create", payload.agent_key, payload.model_dump())
     await db.commit()
     await db.refresh(agent)
+    invalidate_runtime()  # 新智能体立即进入下一次调度
     logger.info("agent created key=%s by=%s", agent.agent_key, ctx.account_id)
     return ok(_detail(agent).model_dump())
 
@@ -215,6 +217,7 @@ async def update_agent(
     await _audit(db, request, ctx, "agent_update", agent_key, changes)
     await db.commit()
     await db.refresh(agent)
+    invalidate_runtime()
     return ok(_detail(agent).model_dump())
 
 
@@ -233,6 +236,7 @@ async def set_agent_status(
     await _audit(db, request, ctx, "agent_status", agent_key, {"status": payload.status})
     await db.commit()
     await db.refresh(agent)
+    invalidate_runtime()  # 启停即时生效: 暂停的执行智能体不再获得 handoff 工具
     logger.info("agent status changed key=%s status=%s by=%s", agent_key, payload.status, ctx.account_id)
     return ok(_detail(agent).model_dump())
 
@@ -250,5 +254,6 @@ async def delete_agent(
     await db.delete(agent)
     await _audit(db, request, ctx, "agent_delete", agent_key)
     await db.commit()
+    invalidate_runtime()
     logger.info("agent deleted key=%s by=%s", agent_key, ctx.account_id)
     return ok(None)
