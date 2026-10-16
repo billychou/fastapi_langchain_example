@@ -10,7 +10,7 @@
 import {
   DeleteOutlined,
   EditOutlined,
-  MoreOutlined,
+  EllipsisOutlined,
   PauseCircleOutlined,
   PlayCircleOutlined,
   PlusOutlined,
@@ -393,7 +393,7 @@ const AgentsPage: React.FC = () => {
                       <Tag
                         bordered={false}
                         color={agent.status === 'active' ? 'success' : 'gold'}
-                        style={{ marginInlineEnd: 0 }}
+                        style={{ marginInlineEnd: 0, alignSelf: 'flex-start' }}
                       >
                         {agent.status === 'active' ? '活动' : '暂停'}
                       </Tag>
@@ -450,7 +450,7 @@ const AgentsPage: React.FC = () => {
                         trigger={['click']}
                         menu={{ items: menuFor(agent) }}
                       >
-                        <Button type="text" icon={<MoreOutlined />} />
+                        <Button type="text" icon={<EllipsisOutlined />} />
                       </Dropdown>
                     </div>
                   </div>
